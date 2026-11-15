@@ -14,7 +14,7 @@ webshark 不生产 pcapng、不解析协议：分片由外部 dumpcap 滚动写�
 | `internal/stream` | 实时推送流引擎：会话管理器 + 每流 worker + 筛选模式 + WS 线格式 |
 | `internal/sharkd` | JSON-RPC over UDS 客户端（懒拨号、断线重拨、互斥串行） |
 | `internal/spool` | 分片枚举（mtime 降序）与分片出现检测（fsnotify + stat 兜底） |
-| `web/` | 前端 SPA（React 18 + Fluent UI v9 + Vite 6），`//go:embed all:dist` 内嵌 |
+| `web/` | 前端 SPA（React 18 + Fluent UI v9 + Vite 6），打包为单个 `dist.zip` 后 `//go:embed` 内嵌 |
 
 ## 数据流
 

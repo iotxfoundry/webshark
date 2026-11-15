@@ -6,7 +6,7 @@
   "packageManager": "yarn@4.16.0",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node -e \"require('fs').writeFileSync('dist/.gitkeep','')\"",
+    "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",

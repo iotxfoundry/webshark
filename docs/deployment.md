@@ -162,5 +162,5 @@ webshark 全部接口同源无前缀，可挂任意反代子路径，无需重�
 | `/api/status` 返回 `connected: false` 带 `reason` | sharkd socket 不可拨。确认 sharkd 在跑、路径与 `-sharkd` 一致、socket 文件归属与 webshark 用户可读（`ls -l /run/webshark/sharkd.sock`）；sharkd 崩溃由 `Restart=always` 拉起 |
 | spool 无分片 / 列表空 | dumpcap 未起或权限不足写不进 spool；`ls -l /var/lib/webshark`，确认文件属 `*.pcapng` 且 mtime 在更新；`journalctl -u dumpcap` 看抓包权限报错 |
 | 界面一直 401 | token 配置后 `/api/*` 必须带 token：浏览器先在录入页输入；WS 与下载走 `?token=`。核对前端录入值与 `WEBSHARK_TOKEN` 一致 |
-| 界面空白/提示未构建 | `web/dist` 未构建即编译了二进制。`make web && make build`，或开发态用 `-web-dir web/dist` |
+| 界面空白/提示未构建 | 二进制里内嵌的是旧/空 `web/dist.zip`。`make web && make build` 重新打包，或开发态用 `-web-dir web/dist` 指向刚构建的目录 |
 | 有分片但看不到新行 | dumpcap 与 `-ring` 不匹配导致旧片不轮换；或 sharkd 版本过老。确认 `-b files:16` 与 `-ring 16` 对齐 |

@@ -37,7 +37,7 @@ type Config struct {
 	SharkdSock string       // sharkd daemon 的 Unix socket 路径
 	RingSize   int          // 环窗分片数, 0 → 默认 16（对齐 dumpcap -b files:16）
 	Token      string       // API 鉴权 token, 空 = 不鉴权
-	Web        fs.FS        // 静态站点根, nil → 内嵌 web/dist（未构建时回提示页）
+	Web        fs.FS        // 静态站点根, nil → 内嵌 web/dist.zip（未构建时回提示页）
 	Log        *slog.Logger // nil → slog.Default()
 }
 

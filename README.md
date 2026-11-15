@@ -34,7 +34,7 @@ webshark 是 **Wireshark 的 Web 前端**（仅服务端）：不生产 pcapng�
 1. 构建并产出分片：
 
 ```sh
-make all                      # 前端产物 web/dist + 二进制 bin/webshark
+make all                      # 前端打包 web/dist.zip + 二进制 bin/webshark
 sudo mkdir -p /var/lib/webshark /run/webshark
 sudo dumpcap -i eth0 -b filesize:8388608 -b files:16 -w /var/lib/webshark/net.pcapng
 ```
@@ -62,7 +62,7 @@ bin/webshark -listen 127.0.0.1:8080
 | `-spool` | `/var/lib/webshark` | pcapng 分片目录（dumpcap 滚动写入） |
 | `-ring` | `16` | 环窗分片数（对齐 `dumpcap -b files:16`） |
 | `-token` | 空 | API 鉴权 token；为空时读环境变量 `WEBSHARK_TOKEN` |
-| `-web-dir` | 空 | 静态站点磁盘目录（开发用；空 = 内嵌 `web/dist`，未构建时回提示页） |
+| `-web-dir` | 空 | 静态站点磁盘目录（开发用；空 = 内嵌 `web/dist.zip`） |
 | `-version` | — | 打印版本退出 |
 
 ## 配置与鉴权
@@ -77,7 +77,7 @@ bin/webshark -listen 127.0.0.1:8080
 ```sh
 make all      # 全量构建：前端产物 + 二进制
 make build    # 仅 Go 二进制（前端未构建时服务端回退提示页）
-make web      # 前端构建（yarn install --immutable && yarn build）
+make web      # 前端构建并打包为 web/dist.zip（入库产物）
 make test     # Go 测试
 make vet      # go vet ./...
 make fmt      # gofmt -l -w .
@@ -90,7 +90,7 @@ cd web
 yarn install --immutable
 yarn typecheck && yarn test && yarn lint
 yarn dev            # 开发服务器
-yarn build          # 产物输出 web/dist/
+yarn build          # 产物输出 web/dist/（入库的是 make web 打出的 dist.zip）
 ```
 
 后端开发时可用磁盘目录替代内嵌产物：

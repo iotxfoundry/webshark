@@ -6,12 +6,9 @@
 *.out
 coverage.*
 
-# 前端
+# 前端：构建中间产物不入库，入库的是打包后的 web/dist.zip
 web/node_modules/
-# dist 只保留占位文件: go:embed all:dist 需要目录存在
-web/dist/*
-!web/dist/.gitkeep
-web/dist.zip
+web/dist/
 web/.yarn/*
 !web/.yarn/releases/
 
