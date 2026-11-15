@@ -1,0 +1,22 @@
+# sharkd：Wireshark 协议解析 daemon，JSON-RPC over Unix socket
+# socket 路径与 webshark -sharkd 默认值一致；spool 只读。
+[Unit]
+Description=sharkd daemon (Wireshark protocol analysis)
+Before=webshark.service
+
+[Service]
+User=webshark
+RuntimeDirectory=webshark
+RuntimeDirectoryMode=0750
+ExecStart=/usr/bin/sharkd -a unix:/run/webshark/sharkd.sock --foreground
+Restart=always
+RestartSec=3
+
+# 只需读分片与写自己的 socket
+ProtectSystem=strict
+ReadOnlyPaths=/var/lib/webshark
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

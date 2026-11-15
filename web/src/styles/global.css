@@ -1,0 +1,51 @@
+/* webshark global styles — 工业深色蓝主题 */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: "Fira Code", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 等宽字体：变量名 / 地址 / 代码 / 表格数据 */
+.mono {
+  font-family: "Fira Code", "Cascadia Code", "JetBrains Mono", monospace;
+}
+
+/* 滚动条: 浅色主题为深灰滑块, data-theme=dark 时切换为白色滑块 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.5);
+}
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.35);
+}
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* 按钮内文字禁折行(换行机制归容器 flex-wrap, 按钮恒按内容自然宽撑开);
+   类名重复一次提高特异性, 压过 griffel 运行时注入的同等规则 */
+.fui-Button.fui-Button {
+  white-space: nowrap;
+}

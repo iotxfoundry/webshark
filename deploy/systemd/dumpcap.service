@@ -1,0 +1,25 @@
+# dumpcap：环形抓包写 webshark spool 分片目录
+# 抓包权限方案 A：专用用户（发行版安装时已赋 dumpcap 文件能力
+# cap_net_admin,cap_net_raw）。方案 B 替代：User=root 并加
+# AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN（systemd 注入，不依赖 filecap）。
+# -b files:16 必须与 webshark -ring 16 对齐。
+[Unit]
+Description=dumpcap ring capture into webshark spool
+After=network.target
+Before=webshark.service
+
+[Service]
+User=dumpcap
+ExecStartPre=/usr/bin/setfacl -m u:dumpcap:rwx /var/lib/webshark
+ExecStart=/usr/bin/dumpcap -i eth0 -b filesize:8388608 -b files:16 -w /var/lib/webshark/net.pcapng
+Restart=always
+RestartSec=3
+
+# 仅需抓包与写 spool，收紧其余权限（dumpcap 需要原始能力，NoNewPrivileges 不设 yes）
+ProtectSystem=strict
+ReadWritePaths=/var/lib/webshark
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

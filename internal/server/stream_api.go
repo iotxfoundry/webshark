@@ -1,0 +1,154 @@
+// stream_api.go - 流接入面：POST /api/subscribe（建流并回读状态）、GET /api/frame
+// （单帧详情，按复合键路由实时实例/分片缓存实例）、POST /api/follow|tap（流级
+// 交互查询透传）。参数集与行为契约见 docs/api.md 第 2 节。
+package server
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/iotxfoundry/webshark/internal/stream"
+)
+
+// handleSubscribe POST /api/subscribe：{handle, filter?, paused?} 建流/保活并
+// 回读流状态（handle 由前端生成并长期复用，服务端幂等）。流数达上限 429。
+func (s *Server) handleSubscribe(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Handle string  `json:"handle"`
+		Filter *string `json:"filter"`
+		Paused *bool   `json:"paused"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil || req.Handle == "" {
+		writeErr(w, http.StatusBadRequest, http.StatusBadRequest, "subscribe 须携带 handle")
+		return
+	}
+	sess, err := s.mgr.GetOrCreate(req.Handle)
+	if errors.Is(err, stream.ErrStreamLimit) {
+		writeErr(w, http.StatusTooManyRequests, http.StatusTooManyRequests, err.Error())
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if req.Filter != nil { // 重连时原子重建流状态，免得数据先于 _ctl 到达
+		sess.RequestFilter(*req.Filter)
+	}
+	if req.Paused != nil {
+		sess.SetPaused(*req.Paused)
+	}
+	sess.Touch()
+	writeJSON(w, map[string]any{
+		"ok": true, "handle": sess.Handle(),
+		"paused": sess.Paused(), "filter": sess.Filter(),
+		"shard": sess.Shard(),
+	})
+}
+
+// handleFrame GET /api/frame?handle=&shard?=&num=&proto?=&bytes?=：单帧详情，
+// shard 等于该流实时实例当前分片 → 流实例查询；否则走分片缓存实例（按需 load，
+// LRU 12 片）。sharkd envelope 错误：frame 业务错 400、历史分片 load 失败 404；
+// 传输失败 503。
+func (s *Server) handleFrame(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	sess := s.mgr.Lookup(q.Get("handle"))
+	if sess == nil {
+		writeErr(w, http.StatusNotFound, http.StatusNotFound, "流不存在或已过期")
+		return
+	}
+	num, err := strconv.Atoi(q.Get("num"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, http.StatusBadRequest, "num 须为整数帧号")
+		return
+	}
+	// 单帧详情标志透传：proto/bytes 仅存在时解析为布尔（缺省不携键）。校验前移：
+	// 参数合法性先于路由就绪性。
+	params := map[string]any{"frame": num}
+	for _, key := range []string{"proto", "bytes"} {
+		v, ok := extractBool(q, key)
+		if !ok {
+			writeErr(w, http.StatusBadRequest, http.StatusBadRequest, key+" 须为布尔值")
+			return
+		}
+		if v != nil {
+			params[key] = *v
+		}
+	}
+	cur := sess.Shard()
+	shard := q.Get("shard")
+	if shard == "" {
+		shard = cur
+	}
+	if shard == "" {
+		writeErr(w, http.StatusConflict, http.StatusConflict, "实时实例尚未就绪（未 load 任何分片）")
+		return
+	}
+	if strings.ContainsAny(shard, `/\`) { // 纯文件名校验，防任意路径穿越
+		writeErr(w, http.StatusBadRequest, http.StatusBadRequest, "shard 须为纯文件名")
+		return
+	}
+	if shard != cur { // 历史行：分片缓存实例按需 load（LRU）查询
+		res, err := s.cache.frame(shard, params)
+		if err != nil {
+			writeSharkErr(w, err, http.StatusNotFound, "分片不存在或已被清理")
+			return
+		}
+		sess.Touch()
+		writeJSON(w, json.RawMessage(res))
+		return
+	}
+	res, err := sess.Call("frame", params)
+	if err != nil {
+		writeSharkErr(w, err, http.StatusBadRequest, "帧查询失败")
+		return
+	}
+	sess.Touch()
+	writeJSON(w, json.RawMessage(res))
+}
+
+// extractBool 取查询参数的布尔值：缺失返回 (nil, true)；存在但非法 (nil, false)。
+func extractBool(q map[string][]string, key string) (*bool, bool) {
+	v, ok := q[key]
+	if !ok || len(v) == 0 || v[0] == "" {
+		return nil, true
+	}
+	b, err := strconv.ParseBool(v[0])
+	if err != nil {
+		return nil, false
+	}
+	return &b, true
+}
+
+// handleStreamRPC follow/tap 共用体：body {handle, ...方法参数}——删除 handle
+// 后原样透传给该流实时实例，响应 JSON 透传。参数不做语义校验（参数集由前端与
+// sharkd 协议定义）。envelope 错误→400，传输失败→503，流不存在→404。
+func (s *Server) handleStreamRPC(method string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
+			writeErr(w, http.StatusBadRequest, http.StatusBadRequest, "body 须为 JSON 对象")
+			return
+		}
+		handle, _ := body["handle"].(string)
+		if handle == "" {
+			writeErr(w, http.StatusBadRequest, http.StatusBadRequest, "须携带 handle")
+			return
+		}
+		sess := s.mgr.Lookup(handle)
+		if sess == nil {
+			writeErr(w, http.StatusNotFound, http.StatusNotFound, "流不存在或已过期")
+			return
+		}
+		delete(body, "handle")
+		res, err := sess.Call(method, body)
+		if err != nil {
+			writeSharkErr(w, err, http.StatusBadRequest, "查询失败")
+			return
+		}
+		sess.Touch()
+		writeJSON(w, json.RawMessage(res))
+	}
+}

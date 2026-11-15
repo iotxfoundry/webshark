@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 不装 Node：带 node_modules 的工作区里 go ./... 会扫到其中的第三方 Go 包；
+      # CI 工作区不含 node_modules，./... 安全。
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.27.x
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./internal/... ./pkg/...
+
+      - name: Test
+        run: go test -race ./...
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable corepack (yarn 4)
+        run: corepack enable
+
+      - name: Install
+        run: yarn install --immutable
+
+      - name: Typecheck
+        run: yarn typecheck
+
+      - name: Lint
+        run: yarn lint
+
+      - name: Test
+        run: yarn test
+
+      - name: Build
+        run: yarn build
