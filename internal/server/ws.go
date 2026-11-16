@@ -15,10 +15,11 @@ import (
 // maxCtlMsg WS 上行单条消息上限（仅 _ctl 流控制，量级极小）。
 const maxCtlMsg = 32 << 10
 
-// pongWait/pingPeriod 读超时与 ping 周期（测试可覆盖，生产不得改小）。
-var (
-	pongWait   = 90 * time.Second
-	pingPeriod = 30 * time.Second
+// defaultPongWait/defaultPingPeriod 读超时与 ping 周期默认值（Server 实例字段，
+// 测试可按实例覆盖，生产不得改小）。
+const (
+	defaultPongWait   = 90 * time.Second
+	defaultPingPeriod = 30 * time.Second
 )
 
 // handleWS GET /api/ws?handle=<handle>。
@@ -43,9 +44,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	ws.SetReadLimit(maxCtlMsg)
 	// 死连接回收：读超时 + pong 续期（浏览器自动回 pong），超时读循环退出 →
-	// Detach → 宽限回收。包级参数仅此处读一次入快照（协程用快照，测试覆盖包级
-	// 变量时不与尚存协程竞态）。
-	pw, pp := pongWait, pingPeriod
+	// Detach → 宽限回收。实例参数仅此处读一次入快照（协程用快照）。
+	pw, pp := s.pongWait, s.pingPeriod
 	if err := ws.SetReadDeadline(time.Now().Add(pw)); err != nil {
 		sess.Detach(ws) // 已 Attach：失败必须解绑，否则会话带着死连接永不回收
 		_ = ws.Close()
@@ -84,7 +84,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	sess.Enqueue(stream.HelloFrame("live"))
+	sess.Enqueue(stream.HelloFrame())
 
 	for { // 读循环：_ctl 流控制（其余上行忽略）
 		_, data, err := ws.ReadMessage()

@@ -8,12 +8,13 @@ import (
 	"fmt"
 )
 
-// HelloFrame 序列化握手确认帧 {"type":"hello","mode":mode}。
-func HelloFrame(mode string) []byte {
+// HelloFrame 序列化握手确认帧 {"type":"hello","mode":"live"}（hello 帧仅
+// live 模式使用，mode 恒为 "live"）。
+func HelloFrame() []byte {
 	return mustJSON(struct {
 		Type string `json:"type"`
 		Mode string `json:"mode"`
-	}{"hello", mode})
+	}{"hello", "live"})
 }
 
 // RowsFrame 序列化微批行帧：rows 为 sharkd frames 行原样 JSON（已含 ref 复合键）。

@@ -63,7 +63,7 @@ func TestWithRefRow(t *testing.T) {
 
 // TestWireFrames 锁定下行线格式契约（docs/api.md 第 3 节，字段名/取值不得变更）。
 func TestWireFrames(t *testing.T) {
-	require.JSONEq(t, `{"type":"hello","mode":"live"}`, string(HelloFrame("live")))
+	require.JSONEq(t, `{"type":"hello","mode":"live"}`, string(HelloFrame()))
 	require.JSONEq(t,
 		`{"type":"rows","mode":"filter","shard":"s1.pcapng","rows":[{"num":1}]}`,
 		string(RowsFrame("filter", "s1.pcapng", []json.RawMessage{json.RawMessage(`{"num":1}`)})))

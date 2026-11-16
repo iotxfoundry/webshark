@@ -4,6 +4,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/iotxfoundry/webshark/internal/sharkd"
@@ -29,7 +30,8 @@ func writeJSON(w http.ResponseWriter, v any) {
 // 状态取 fallback——历史分片 load 失败 404、业务错误 400）；传输失败（连接断、
 // 超时等）恒 503。
 func writeSharkErr(w http.ResponseWriter, err error, fallback int, fallbackMsg string) {
-	if se, ok := err.(*sharkd.Error); ok {
+	var se *sharkd.Error
+	if errors.As(err, &se) { // As 而非断言：被 %w 包装后仍透传，不静默降级 503
 		writeErr(w, fallback, se.Code, se.Message)
 		return
 	}

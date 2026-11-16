@@ -10,6 +10,7 @@ package stream
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -294,8 +295,4 @@ func (m *Manager) pullShard(s *Session, shard string, pos *streamPos, b *batch, 
 }
 
 // errFramesShape frames 响应形态异常（非裸行数组）。
-var errFramesShape = shapeError{}
-
-type shapeError struct{}
-
-func (shapeError) Error() string { return "frames 响应形态异常（非裸行数组）" }
+var errFramesShape = errors.New("frames 响应形态异常（非裸行数组）")

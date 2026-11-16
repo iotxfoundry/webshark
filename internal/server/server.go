@@ -31,14 +31,16 @@ type Config struct {
 
 // Server HTTP 服务：流管理器 + 分片缓存实例 + 静态站点。
 type Server struct {
-	cfg    Config
-	log    *slog.Logger
-	mgr    *stream.Manager
-	cache  *shardCache
-	upgr   websocket.Upgrader
-	webFS  fs.FS
-	hasSPA bool
-	close  func() error
+	cfg        Config
+	log        *slog.Logger
+	mgr        *stream.Manager
+	cache      *shardCache
+	upgr       websocket.Upgrader
+	webFS      fs.FS
+	hasSPA     bool
+	close      func() error
+	pongWait   time.Duration // WS 读超时（死连接回收）
+	pingPeriod time.Duration // WS ping 保活周期
 }
 
 // New 装配服务（不做 IO：spool 目录与 sharkd 可达性由 handler 运行期报告）。
@@ -51,12 +53,14 @@ func New(cfg Config) *Server {
 	}
 	mgr := stream.NewManager(stream.Config{Sock: cfg.SharkdSock, SpoolDir: cfg.SpoolDir, RingSize: cfg.RingSize, Log: cfg.Log})
 	s := &Server{
-		cfg:   cfg,
-		log:   cfg.Log,
-		mgr:   mgr,
-		cache: newShardCache(cfg.SharkdSock, cfg.SpoolDir),
-		upgr:  websocket.Upgrader{ReadBufferSize: 4096, WriteBufferSize: 4096, CheckOrigin: checkOrigin},
-		webFS: cfg.Web,
+		cfg:        cfg,
+		log:        cfg.Log,
+		mgr:        mgr,
+		cache:      newShardCache(cfg.SharkdSock, cfg.SpoolDir),
+		upgr:       websocket.Upgrader{ReadBufferSize: 4096, WriteBufferSize: 4096, CheckOrigin: checkOrigin},
+		webFS:      cfg.Web,
+		pongWait:   defaultPongWait,
+		pingPeriod: defaultPingPeriod,
 	}
 	index, err := fs.Stat(cfg.Web, "index.html")
 	s.hasSPA = err == nil && !index.IsDir()

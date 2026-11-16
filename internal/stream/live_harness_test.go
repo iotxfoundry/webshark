@@ -361,7 +361,7 @@ func attachRaw(t *testing.T, s *Session) *websocket.Conn {
 	t.Helper()
 	test, srv := newFakeWS(t)
 	old := s.Attach(srv)
-	s.Enqueue(HelloFrame("live"))
+	s.Enqueue(HelloFrame())
 	go writerLoop(s, srv)
 	wsClientMu.Lock()
 	wsClient[srv] = test
@@ -377,7 +377,7 @@ func dialSession(t *testing.T, s *Session) *websocket.Conn {
 	if old := s.Attach(srv); old != nil {
 		_ = old.Close()
 	}
-	s.Enqueue(HelloFrame("live"))
+	s.Enqueue(HelloFrame())
 	go writerLoop(s, srv)
 	wsClientMu.Lock()
 	wsClient[srv] = test

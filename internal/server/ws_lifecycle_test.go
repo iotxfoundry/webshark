@@ -40,11 +40,9 @@ func TestWSHelloAfterFullQueue(t *testing.T) {
 // 服务端经 pongWait 读超时主动断开——客户端后续读须返回非 timeout 错误（连接
 // 已被服务端关闭）。
 func TestWSDeadConnReclaimed(t *testing.T) {
-	oldWait, oldPeriod := pongWait, pingPeriod
-	pongWait, pingPeriod = 200*time.Millisecond, 50*time.Millisecond
-	t.Cleanup(func() { pongWait, pingPeriod = oldWait, oldPeriod })
+	srv, ts, _, _ := newServer(t, nil)
+	srv.pongWait, srv.pingPeriod = 200*time.Millisecond, 50*time.Millisecond
 
-	_, ts, _, _ := newServer(t, nil)
 	ws, err := dialWS(t, ts, nil, "handle=h-dead")
 	require.NoError(t, err)
 	_ = readFrame(t, ws) // 消费 hello（此后不读不 pong）
