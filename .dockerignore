@@ -1,0 +1,3 @@
+# 构建上下文：前端工程与 .git 不进上下文（镜像只需 bin/webshark 与 entrypoint）
+.git
+web/ui

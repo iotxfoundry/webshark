@@ -53,6 +53,49 @@ bin/webshark -listen 127.0.0.1:8080
 
 没有 dumpcap 时可手工落盘验证链路（text2pcap 造包后按 `net_*.pcapng` 命名放入 spool 目录）。
 
+## Docker
+
+镜像三合一：`dumpcap`（抓包）+ `sharkd`（解析）+ `webshark`（服务），单容器即完整 appliance。运行时基座为 Debian testing，其 sharkd/dumpcap 为 4.6.x，与本项目协议校准基线一致。
+
+```sh
+make image        # = make build + docker build -f build/Dockerfile
+```
+
+镜像内即含三件套（`dumpcap`/`sharkd` 来自 Debian testing 的 wireshark-common 4.6.x；`webshark` 二进制在编译期内嵌前端），构建为单阶段打包本地产物，无多阶段构建。
+
+抓宿主机物理网卡（`--network host` 才能看到物理网卡；抓包需授予网络能力；spool 建议挂持久卷）：
+
+```sh
+docker run -d --name webshark \
+  --network host \
+  --cap-add NET_ADMIN --cap-add NET_RAW \
+  -e WEBSHARK_TOKEN=$(openssl rand -hex 32) \
+  -v /var/lib/webshark:/var/lib/webshark \
+  webshark
+```
+
+只分析已有分片（不抓包，无需能力与 host 网络）：
+
+```sh
+docker run -d --name webshark -p 8080:8080 \
+  -e DUMPCAP_IFACE=none \
+  -e WEBSHARK_TOKEN=$(openssl rand -hex 32) \
+  -v "$PWD/pcap:/var/lib/webshark:ro" \
+  webshark
+```
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `LISTEN` | `0.0.0.0:8080` | 监听地址；非 loopback 必须配 `WEBSHARK_TOKEN`（服务端安全阀强制，缺失即退出） |
+| `WEBSHARK_TOKEN` | 空 | API 鉴权 token |
+| `SPOOL` | `/var/lib/webshark` | 分片目录（建议挂持久卷） |
+| `DUMPCAP_IFACE` | `eth0` | 抓包网卡；`none` = 不启动抓包 |
+| `DUMPCAP_FILTER` | 空 | BPF 捕获过滤串 |
+| `DUMPCAP_FILESIZE` | `8388608` | 单分片字节数 |
+| `DUMPCAP_FILES` | `16` | 分片数（容器内自动与 `-ring` 对齐） |
+
+说明：容器内进程以 root 运行，dumpcap 的抓包能力来自运行时授予的 capabilities，不写入镜像；默认监听 `0.0.0.0` 时必须设置 token，如需免 token 请 `--network host` 并设 `LISTEN=127.0.0.1:8080`。
+
 ## CLI 参数
 
 | 参数 | 默认值 | 说明 |
