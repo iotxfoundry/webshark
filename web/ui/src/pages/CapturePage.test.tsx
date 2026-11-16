@@ -1,7 +1,8 @@
-// CapturePage.test.tsx - 抓包页集成(live 对接): subscribe 先行建流 + 零轮询(无 status 轮询/
-// 无 JSON-RPC 轮询) / rows 推送渲染(No.=聚合序号) / 帧详情 HTTP 化(ref 复合键路由, 404 历史分片
-// 横幅) / 换帧详情常挂 / 自动跟随浮钮入口 / 暂停恢复抓包(_ctl 上行) / 断线重连(subscribe 再
-// 行)/ 导出.
+// CapturePage.test.tsx - 抓包页集成(live 对接): subscribe 先行建流 + 零 JSON-RPC 轮询(WS 无
+// JSON-RPC; status 探活为独立 HTTP 轮询) / rows 推送渲染(No.=聚合序号) / 帧详情 HTTP 化(ref 复
+// 合键路由, 404 历史分片横幅) / 换帧详情常挂 / 自动跟随浮钮入口 / 暂停恢复抓包(_ctl 上行) / 断
+// 线重连(subscribe 再行)/ 导出 / 工具栏(品牌 standalone 显示|embedded 隐藏, 状态徽章来自
+// status 探活, 主题/令牌图标钮).
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, screen } from "@testing-library/react";
 import { FluentProvider, webDarkTheme } from "@fluentui/react-components";
@@ -58,6 +59,8 @@ describe("CapturePage", () => {
   let releaseFrame: () => void;
   /** tap expert HTTP 端点应答(专家面板用例) */
   let tapReply: unknown;
+  /** GET /api/status 应答(工具栏 sharkd 徽章/分片数用) */
+  let statusReply: { connected: boolean; files: { name: string; size: number; mtime: string }[]; reason?: string };
   beforeEach(() => {
     vi.useFakeTimers();
     origWS = window.WebSocket;
@@ -67,12 +70,16 @@ describe("CapturePage", () => {
     frameReply = { status: 200, body: { tree: [{ l: "Ethernet II" }], bytes: "AAE=" } };
     frameHold = null;
     tapReply = { taps: [] };
+    statusReply = { connected: true, files: [{ name: "a.pcapng", size: 1, mtime: "" }] };
     setToken("tk-page");
-    // fetch 路由: subscribe(建流)/frame(详情)/check/complete 放行; 其余 URL throw 暴露未预期请求
+    // fetch 路由: subscribe(建流)/status(探活)/frame(详情)/check/complete 放行; 其余 URL throw 暴露未预期请求
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/subscribe")) {
         return { ok: true, status: 200, json: async () => ({ ok: true, handle: "h", paused: false, filter: "", shard: "a.pcapng" }) } as Response;
+      }
+      if (url.includes("/api/status")) {
+        return { ok: true, status: 200, json: async () => statusReply } as Response;
       }
       if (url.includes("/api/check")) {
         return { ok: true, status: 200, json: async () => ({ status: "OK" }) } as Response;
@@ -106,10 +113,10 @@ describe("CapturePage", () => {
   }
 
   /** 挂载并建流(subscribe → WS 握手 + hello + 首批 rows 推送) */
-  async function mountOpen(rows: CaptureRowWire[] = [], shard = "a.pcapng") {
+  async function mountOpen(rows: CaptureRowWire[] = [], shard = "a.pcapng", props: { embedded?: boolean; onOpenToken?: () => void } = {}) {
     render(
       <FluentProvider theme={webDarkTheme}>
-        <CapturePage />
+        <CapturePage embedded={props.embedded} onOpenToken={props.onOpenToken} />
       </FluentProvider>,
     );
     await act(async () => { await vi.runOnlyPendingTimersAsync(); });
@@ -123,7 +130,7 @@ describe("CapturePage", () => {
     return ws;
   }
 
-  it("subscribe 先行建流 + 零轮询: 无 status fetch, WS 无 JSON-RPC; 等待期占位数据到达即退", async () => {
+  it("subscribe 先行建流 + WS 零 JSON-RPC 轮询: 等待期占位数据到达即退", async () => {
     render(
       <FluentProvider theme={webDarkTheme}>
         <CapturePage />
@@ -145,12 +152,42 @@ describe("CapturePage", () => {
     // 时间推进(轮询若存在必发请求/调用) + 推送第一批: 占位退, 行渲染
     act(() => { vi.advanceTimersByTime(10_000); });
     await act(async () => { await vi.runOnlyPendingTimersAsync(); });
-    expect((fetch as ReturnType<typeof vi.fn>).mock.calls.some(([i]) => String(i).includes("/api/status"))).toBe(false);
     expect(rpcRequests(ws)).toEqual([]); // 零 JSON-RPC 轮询
-    expect(subscribeCalls()).toBe(1); // 建流外无额外请求
+    expect(subscribeCalls()).toBe(1); // 建流外 WS 无额外握手
     act(() => { ws.push({ type: "rows", mode: "live", shard: "a.pcapng", rows: [wire(1)] }); });
     expect(screen.queryByText(/正在等待实时数据流/)).not.toBeInTheDocument();
     expect(screen.getByText("info 1")).toBeInTheDocument();
+  });
+
+  it("工具栏 standalone: 品牌显示 + sharkd 徽章/分片数来自 status 探活 + 主题/令牌图标钮", async () => {
+    statusReply = { connected: true, files: [{ name: "a.pcapng", size: 1, mtime: "" }, { name: "b.pcapng", size: 1, mtime: "" }] };
+    const openToken = vi.fn();
+    await mountOpen([wire(1)], "a.pcapng", { onOpenToken: openToken });
+    expect(screen.getByText("webshark")).toBeVisible();
+    expect(screen.getByText("sharkd 在线")).toBeInTheDocument();
+    expect(screen.getByText("2 分片")).toBeInTheDocument();
+    expect(screen.getByText("已连接")).toBeInTheDocument();
+    expect(screen.queryByText("报文分析")).not.toBeInTheDocument();
+    // 主题图标钮: 存在且可切换
+    const themeBtn = screen.getByRole("button", { name: "切换主题" });
+    expect(themeBtn.querySelector("svg")).not.toBeNull();
+    fireEvent.click(themeBtn);
+    expect(localStorage.getItem("webshark-theme")).toBe("light");
+    // 令牌图标钮: 存在且触发回调
+    fireEvent.click(screen.getByRole("button", { name: "访问令牌" }));
+    expect(openToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("工具栏 embedded: 品牌隐藏(占位保留) 其余一致; status 失败 → sharkd 离线徽章", async () => {
+    statusReply = { connected: false, files: [], reason: "sharkd 未就绪" };
+    await mountOpen([], "a.pcapng", { embedded: true });
+    const brand = screen.getByText("webshark");
+    expect(brand).not.toBeVisible(); // visibility 隐藏, 工具栏高度不跳
+    expect(screen.getByText("sharkd 离线")).toBeInTheDocument();
+    expect(screen.getByText("0 分片")).toBeInTheDocument();
+    expect(screen.getByText("已连接")).toBeInTheDocument(); // WS 流与 status 探活互相独立
+    // standalone 仅在非嵌入形态显示品牌
+    expect(screen.queryByText("报文分析")).not.toBeInTheDocument();
   });
 
   it("rows 推送渲染: No. 列 = 聚合序号(跨分片连续), 点行走 HTTP frame(ref 复合键)", async () => {

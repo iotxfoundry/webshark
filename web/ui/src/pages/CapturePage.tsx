@@ -1,4 +1,5 @@
-// CapturePage.tsx - 报文分析(Wireshark 三面板): 每流一条 WS → 服务端推送消费(纯推送, 零轮询).
+// CapturePage.tsx - 抓包页(单条工具栏承载品牌/状态徽章/操作, 自撑满 100dvh):
+// 工具栏形态: standalone 显示品牌文字; iframe 嵌入(embedded)隐藏品牌, 其余一致.
 // 数据面: 服务端后台追帧 → rows 微批推送(行含 ref 复合查询键) → 跨分片聚合器追加渲染(显示 No =
 // 聚合自增序号); rotated 信息性; reset 清空聚合器按服务端全量重推对齐; 断线重连(同 handle)按
 // 游标续推无重无漏.
@@ -7,15 +8,22 @@
 // 暂停/恢复抓包 = WS 上行 _ctl{op:"capture"} 流控制(冻结推送, 落盘 spool 不受影响).
 // 分片策略: 永远实时跟随(服务端自动选片), 导出 = spool 全部历史合并单一 pcapng.
 // 布局: 上=包列表+filter 条; 下=协议树详情|原始字节 hex(左右分割, 可拖).
+// (Wireshark 三面板数据面) 每流一条 WS → 服务端推送消费(纯推送, 零轮询).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge, Button, MessageBar, MessageBarBody, MessageBarTitle, Spinner, Text,
   makeStyles, mergeClasses, tokens, Tooltip,
 } from "@fluentui/react-components";
-import { ArrowDownload24Regular, Chat16Regular, Info16Regular, Pause16Regular, Play16Regular } from "@fluentui/react-icons";
+import {
+  ArrowDownload24Regular, Chat16Regular, Info16Regular, Key16Regular,
+  Pause16Regular, Play16Regular, WeatherMoon16Regular, WeatherSunny16Regular,
+} from "@fluentui/react-icons";
 import { useCaptureStream } from "../hooks/useCaptureStream";
+import { useCaptureStatus } from "../hooks/useCaptureStatus";
 import type { CaptureViewRow } from "../hooks/captureAggregator";
 import { downloadCaptureAll } from "../api/capture";
+import { getToken } from "../api/token";
+import { useThemeStore } from "../stores/theme";
 import type { SharkdFrameDetail, SharkdTreeNode } from "../api/sharkdTypes";
 import { CaptureFilterBar } from "../components/capture/CaptureFilterBar";
 import { CapturePacketList } from "../components/capture/CapturePacketList";
@@ -30,8 +38,12 @@ import { useMonoStyles } from "../styles/mono";
 const FOLLOW_TYPES: Record<string, string> = { tcp: "TCP", udp: "UDP", tls: "TLS", http: "HTTP", http2: "HTTP2", quic: "QUIC" };
 
 const useStyles = makeStyles({
-  root: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalS, height: "100%", minHeight: 0 },
-  toolbar: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS },
+  // 100dvh: App 无可见外壳(iframe 嵌入形态亦然), 页面自撑满视口; body 不滚, 内部面板滚
+  root: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalS, height: "100dvh", minHeight: 0, padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}` },
+  toolbar: {
+    display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS,
+    flexShrink: 0,
+  },
   btn: { minWidth: "72px", whiteSpace: "nowrap" },
   // 上下大分割: 上列表区(flex 按高度比例) + 下部详情区
   vSplit: { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 },
@@ -62,11 +74,13 @@ function PaneHint({ text }: { text: string }) {
   return <div className={styles.paneHint}>{text}</div>;
 }
 
-export default function CapturePage() {
+export default function CapturePage({ embedded = false, onOpenToken }: { embedded?: boolean; onOpenToken?: () => void }) {
   const styles = useStyles();
   const monoS = useMonoStyles();
-  const [filterInput, setFilterInput] = useState("");
-  const [paused, setPausedUi] = useState(false);
+  const { theme, toggle } = useThemeStore();
+  const { status } = useCaptureStatus();
+  const fileCount = status?.files?.length ?? 0;
+  const [filterInput, setFilterInput] = useState("");  const [paused, setPausedUi] = useState(false);
   // autoscroll = 纯前端显示开关(数据照常追加, 仅控制吸底), Wireshark 同名语义
   const [following, setFollowingUi] = useState(true);
   const [detail, setDetail] = useState<SharkdFrameDetail | null>(null);
@@ -192,9 +206,19 @@ export default function CapturePage() {
         </MessageBar>
       )}
 
-      {/* 顶栏: 标题 + 会话状态(+暂停徽标) + 专家信息 + 暂停/恢复抓包 + 导出 */}
+      {/* 工具栏: [品牌(嵌入时隐藏)] 状态徽章(sharkd HTTP 探活 / WS 流 / 暂停) + 弹性空隙 +
+          操作(专家信息 / 暂停恢复 / 导出 / 主题 / 令牌). sharkd 探活(HTTP)与 WS 连接是两个
+          不同状态, 均保留各出现一次. */}
       <div className={styles.toolbar}>
-        <Text weight="semibold" size={500}>报文分析</Text>
+        {/* 品牌: standalone 显示; embedded 用 visibility 隐藏(占位不跳高度) */}
+        <Text weight="semibold" size={500} style={{ visibility: embedded ? "hidden" : "visible" }}>
+          webshark
+        </Text>
+        <Badge appearance="tint" color={status?.connected ? "success" : "danger"}
+          title={status?.connected ? "sharkd 已连接" : `sharkd 不可达${status?.reason ? `: ${status.reason}` : ""}`}>
+          {status?.connected ? "sharkd 在线" : "sharkd 离线"}
+        </Badge>
+        <Badge appearance="tint" color="informative" title="spool 分片数">{fileCount} 分片</Badge>
         <Badge appearance="tint" color={conn === "open" ? "success" : conn === "connecting" ? "warning" : "danger"}>
           {conn === "open" ? "已连接" : conn === "connecting" ? "连接中…" : "重连中…"}
         </Badge>
@@ -217,6 +241,18 @@ export default function CapturePage() {
             导出 pcapng
           </Button>
         </Tooltip>
+        {/* 主题切换 / 访问令牌: 图标钮(locked 状态在 App, 令牌录入页经回调由 App 切换) */}
+        <Tooltip content={theme === "dark" ? "切换浅色主题" : "切换深色主题"} relationship="label">
+          <Button appearance="subtle" size="small"
+            icon={theme === "dark" ? <WeatherSunny16Regular /> : <WeatherMoon16Regular />}
+            aria-label="切换主题" onClick={toggle} />
+        </Tooltip>
+        {onOpenToken !== undefined && (
+          <Tooltip content={getToken() === "" ? "设置访问令牌" : "更换访问令牌"} relationship="label">
+            <Button appearance="subtle" size="small" icon={<Key16Regular />}
+              aria-label="访问令牌" onClick={onOpenToken} />
+          </Tooltip>
+        )}
       </div>
 
       {/* filter 条(全宽): 提交即进出筛选模式(_ctl 上行); activeFilter = 已生效筛选(角标+高亮) */}
