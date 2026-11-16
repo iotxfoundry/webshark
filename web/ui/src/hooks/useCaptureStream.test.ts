@@ -111,7 +111,8 @@ describe("useCaptureStream", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     Object.defineProperty(window, "WebSocket", { value: origWS, configurable: true, writable: true });
-    setToken("");
+    // act 包裹: 清理期 setToken 触发 hook 内 token 订阅 setState(RTL cleanup 在其后运行)
+    act(() => { setToken(""); });
   });
 
   async function mount() {
@@ -219,7 +220,9 @@ describe("useCaptureStream", () => {
       ws.push({ type: "rows", mode: "live", shard: "a.pcapng", rows: [wire(1)] });
       ws.push({ type: "rotated", shard: "b.pcapng" });
     });
-    ws.onmessage?.({ data: `${JSON.stringify({ type: "rows", mode: "live", shard: "b.pcapng", rows: [wire(1, "b.pcapng")] })}\n${JSON.stringify({ type: "rows", mode: "live", shard: "b.pcapng", rows: [wire(2, "b.pcapng")] })}` });
+    act(() => {
+      ws.onmessage?.({ data: `${JSON.stringify({ type: "rows", mode: "live", shard: "b.pcapng", rows: [wire(1, "b.pcapng")] })}\n${JSON.stringify({ type: "rows", mode: "live", shard: "b.pcapng", rows: [wire(2, "b.pcapng")] })}` });
+    });
     await act(async () => { await Promise.resolve(); });
     expect(h.result.current.rows.map((r) => r.no)).toEqual([1, 2, 3]);
   });

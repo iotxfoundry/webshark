@@ -15,6 +15,7 @@ import {
 import type { SharkdExpertResponse, SharkdFollowResult, SharkdFrameDetail } from "../api/sharkdTypes";
 import { openSharkdTransport, type SharkdConn } from "./sharkdTransport";
 import { createCaptureAggregator, type CaptureAggregator, type CaptureViewRow } from "./captureAggregator";
+import { getTokenVersion, onTokenChange } from "../api/token";
 
 export function useCaptureStream() {
   const [conn, setConn] = useState<SharkdConn>("connecting");
@@ -30,6 +31,10 @@ export function useCaptureStream() {
   useEffect(() => { filterRef.current = filter; }, [filter]);
   /** 连接就绪后由 transport 注入的上行通道(_ctl 专用) */
   const sendRef = useRef<((line: string) => void) | null>(null);
+
+  /** 令牌版本: token 变化(宿主注入/401 清除)计入建连依赖 → 旧 WS 关闭, 以新令牌重建 */
+  const [tokenVersion, setTokenVersion] = useState(getTokenVersion());
+  useEffect(() => onTokenChange(() => setTokenVersion(getTokenVersion())), []);
 
   // 传输生命周期: 挂载建连(同 handle), 卸载清理; 断线退避重连在 transport 内
   useEffect(() => {
@@ -70,7 +75,7 @@ export function useCaptureStream() {
       },
     });
     return close;
-  }, [agg]);
+  }, [agg, tokenVersion]);
 
   /** _ctl 上行通用: 未连接忽略(重连后按当前态重断言); 发送失败上错误横幅 */
   const sendCtl = useCallback((line: string) => {

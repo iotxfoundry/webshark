@@ -1,9 +1,9 @@
 // App.test.tsx - 单页外壳: 渲染 CapturePage(无可见 chrome) + 401 管线切换 TokenGate +
-// 嵌入形态判定(isEmbedded 注入) + 主题 data-theme 同步.
+// 嵌入形态判定(isEmbedded 注入) + 主题 data-theme 同步 + embedded 协议挂载(401 通知宿主).
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import App from "./App";
-import { setToken } from "./api/token";
+import { setToken, getToken } from "./api/token";
 
 // CapturePage mock(外壳测试不关注三面板内部, 仅断言 props 透传)
 vi.mock("./pages/CapturePage", () => ({
@@ -22,14 +22,24 @@ vi.mock("./env", async (importOriginal) => {
 });
 const mockedIsEmbedded = vi.mocked((await import("./env")).isEmbedded);
 
+/** window.parent.postMessage 捕获(jsdom 中 parent === self, 整体替换隔离) */
+let posted: unknown[] = [];
+const realParent = window.parent;
+
 describe("App", () => {
   beforeEach(() => {
     localStorage.clear();
     setToken("");
+    posted = [];
+    Object.defineProperty(window, "parent", {
+      value: { postMessage: vi.fn((d: unknown) => { posted.push(d); }) },
+      configurable: true,
+    });
     mockedIsEmbedded.mockReturnValue(false);
   });
   afterEach(() => {
     localStorage.clear();
+    Object.defineProperty(window, "parent", { value: realParent, configurable: true });
     vi.restoreAllMocks();
   });
 
@@ -70,5 +80,36 @@ describe("App", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "token-stub" }));
     expect(screen.getByText("webshark 访问令牌")).toBeInTheDocument();
+  });
+
+  it("embedded: 挂载即向宿主 post ready; 401 → post unauthorized 且不弹 TokenGate", async () => {
+    mockedIsEmbedded.mockReturnValue(true);
+    render(<App />);
+    expect(posted).toEqual([{ type: "webshark:ready" }]);
+    const { handleUnauthorized } = await import("./api/client");
+    await act(async () => { handleUnauthorized(); });
+    expect(posted).toEqual([
+      { type: "webshark:ready" },
+      { type: "webshark:unauthorized" },
+    ]);
+    // 保持当前视图(断连横幅/等待态由 CapturePage 呈现), 不弹录入页
+    expect(screen.queryByText("webshark 访问令牌")).not.toBeInTheDocument();
+    expect(screen.getByTestId("capture-page")).toBeInTheDocument();
+  });
+
+  it("embedded: 不向 CapturePage 传 onOpenToken(令牌入口归零)", () => {
+    mockedIsEmbedded.mockReturnValue(true);
+    render(<App />);
+    expect(MockedCapturePage).toHaveBeenCalledWith(
+      expect.objectContaining({ embedded: true, onOpenToken: undefined }), {},
+    );
+  });
+
+  it("embedded: 宿主 set-token 经协议生效且不写 localStorage", () => {
+    mockedIsEmbedded.mockReturnValue(true);
+    render(<App />);
+    window.dispatchEvent(new MessageEvent("message", { data: { type: "webshark:set-token", token: "host-tk" } }));
+    expect(getToken()).toBe("host-tk");
+    expect(localStorage.getItem("webshark-token")).toBeNull();
   });
 });

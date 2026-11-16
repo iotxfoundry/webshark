@@ -241,13 +241,16 @@ export default function CapturePage({ embedded = false, onOpenToken }: { embedde
             导出 pcapng
           </Button>
         </Tooltip>
-        {/* 主题切换 / 访问令牌: 图标钮(locked 状态在 App, 令牌录入页经回调由 App 切换) */}
-        <Tooltip content={theme === "dark" ? "切换浅色主题" : "切换深色主题"} relationship="label">
-          <Button appearance="subtle" size="small"
-            icon={theme === "dark" ? <WeatherSunny16Regular /> : <WeatherMoon16Regular />}
-            aria-label="切换主题" onClick={toggle} />
-        </Tooltip>
-        {onOpenToken !== undefined && (
+        {/* 主题切换 / 访问令牌: 图标钮(locked 状态在 App, 令牌录入页经回调由 App 切换);
+            embedded 下两者隐藏(主题/令牌归宿主管, 经 postMessage 注入) */}
+        {!embedded && (
+          <Tooltip content={theme === "dark" ? "切换浅色主题" : "切换深色主题"} relationship="label">
+            <Button appearance="subtle" size="small"
+              icon={theme === "dark" ? <WeatherSunny16Regular /> : <WeatherMoon16Regular />}
+              aria-label="切换主题" onClick={toggle} />
+          </Tooltip>
+        )}
+        {!embedded && onOpenToken !== undefined && (
           <Tooltip content={getToken() === "" ? "设置访问令牌" : "更换访问令牌"} relationship="label">
             <Button appearance="subtle" size="small" icon={<Key16Regular />}
               aria-label="访问令牌" onClick={onOpenToken} />

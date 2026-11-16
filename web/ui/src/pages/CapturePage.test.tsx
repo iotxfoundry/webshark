@@ -102,7 +102,8 @@ describe("CapturePage", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     Object.defineProperty(window, "WebSocket", { value: origWS, configurable: true, writable: true });
-    setToken("");
+    // act 包裹: 清理期 setToken 触发 hook 内 token 订阅 setState(RTL cleanup 在其后运行)
+    act(() => { setToken(""); });
   });
 
   function subscribeCalls(): number {
@@ -178,7 +179,7 @@ describe("CapturePage", () => {
     expect(openToken).toHaveBeenCalledTimes(1);
   });
 
-  it("工具栏 embedded: 品牌隐藏(占位保留) 其余一致; status 失败 → sharkd 离线徽章", async () => {
+  it("工具栏 embedded: 品牌隐藏(占位保留) + 主题/令牌钮隐藏 + status 失败 → sharkd 离线徽章", async () => {
     statusReply = { connected: false, files: [], reason: "sharkd 未就绪" };
     await mountOpen([], "a.pcapng", { embedded: true });
     const brand = screen.getByText("webshark");
@@ -188,6 +189,33 @@ describe("CapturePage", () => {
     expect(screen.getByText("已连接")).toBeInTheDocument(); // WS 流与 status 探活互相独立
     // standalone 仅在非嵌入形态显示品牌
     expect(screen.queryByText("报文分析")).not.toBeInTheDocument();
+    // 主题/令牌图标钮: embedded 隐藏(归宿主管, 经 postMessage 注入)
+    expect(screen.queryByRole("button", { name: "切换主题" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "访问令牌" })).not.toBeInTheDocument();
+  });
+
+  it("embedded 401 不弹 TokenGate: 保持断连横幅(主题/令牌由宿主管)", async () => {
+    // 401 应答: subscribe 失败 → 断连横幅(而非录入页)
+    (fetch as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/subscribe")) {
+        return { ok: false, status: 401, json: async () => ({ code: 401, message: "未认证" }) } as Response;
+      }
+      if (url.includes("/api/status")) {
+        return { ok: false, status: 401, json: async () => ({ code: 401, message: "未认证" }) } as Response;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    render(
+      <FluentProvider theme={webDarkTheme}>
+        <CapturePage embedded />
+      </FluentProvider>,
+    );
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+    // 无 TokenGate 录入页(TokenGate 由 App 层 standalone 门控); 断连横幅呈现
+    // (宿主重发 set-token 后按新令牌重连, 见 useCaptureStream.test 令牌重连用例)
+    expect(screen.queryByText("webshark 访问令牌")).not.toBeInTheDocument();
+    expect(screen.getByText(/实时流已断开/)).toBeInTheDocument();
   });
 
   it("rows 推送渲染: No. 列 = 聚合序号(跨分片连续), 点行走 HTTP frame(ref 复合键)", async () => {
