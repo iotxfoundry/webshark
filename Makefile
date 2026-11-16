@@ -2,7 +2,7 @@ GO ?= go
 BIN := bin
 
 # 显式列包：web/node_modules 里会有第三方 Go 包，go ./... 会把它扫进构建范围
-PKGS := ./cmd/... ./internal/... ./pkg/... ./web
+PKGS := . ./cmd/... ./internal/... ./web
 
 # 打包时归一化 mtime：内容不变则 zip 字节不变，避免无意义二进制差异
 ZIP_EPOCH := 202001010000.00

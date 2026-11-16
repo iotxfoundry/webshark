@@ -9,7 +9,7 @@ webshark 不生产 pcapng、不解析协议：分片由外部 dumpcap 滚动写�
 | `dumpcap`（外部） | 网卡抓包，`-b filesize/files` 环形滚动写 spool 分片目录 |
 | `sharkd`（外部） | Wireshark daemon，JSON-RPC over UDS，承担全部协议解析 |
 | `cmd/webshark` | 入口：flags 解析、token 安全阀、信号与优雅退出 |
-| `pkg/webshark` | 对外可嵌入 API：`Config`/`New`/`Handler`/`Close`，内聚 `internal/server` |
+| `webshark.go`（根包） | 对外可嵌入 API：`Config`/`New`/`Handler`/`Close`，内聚 `internal/server` |
 | `internal/server` | `/api/*` 路由、token 鉴权中间件、SPA 静态站点、分片缓存实例、下载拼接 |
 | `internal/stream` | 实时推送流引擎：会话管理器 + 每流 worker + 筛选模式 + WS 线格式 |
 | `internal/sharkd` | JSON-RPC over UDS 客户端（懒拨号、断线重拨、互斥串行） |

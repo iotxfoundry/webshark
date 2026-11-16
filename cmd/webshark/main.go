@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/iotxfoundry/webshark/pkg/webshark"
+	"github.com/iotxfoundry/webshark"
 )
 
 // version 版本号（-ldflags 注入）。
