@@ -117,6 +117,11 @@ func TestMultiLineResponse(t *testing.T) {
 			return
 		}
 		defer func() { _ = conn.Close() }()
+		// 先读完请求行再应答：否则可能在客户端 write 未完成时关连接，触发 EPIPE
+		// （-race 下必现的测试竞争，非被测代码行为）。
+		if _, err := bufio.NewReader(conn).ReadString('\n'); err != nil {
+			return
+		}
 		for _, p := range []string{`{"jsonrpc":`, `"2.0","id":1,`, `"result":{"ok":true}}`} {
 			_, _ = fmt.Fprintln(conn, p)
 		}
