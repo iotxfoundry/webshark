@@ -71,6 +71,9 @@ func (f *fakeSharkd) handle(conn net.Conn) {
 		}
 		_, _ = fmt.Fprintf(conn, "%s\n", b)
 	}
+	// 连接正常关闭时 Err 为 nil；读到错误也按会话结束处理——假 sharkd 不区分，
+	// 客户端侧表现为连接断开后重拨。
+	_ = sc.Err()
 }
 
 func TestCallOKAndIncrementingID(t *testing.T) {

@@ -39,7 +39,7 @@ func TestRingWindowStatusAndDownload(t *testing.T) {
 	contents := make(map[string][]byte, 20)
 	base := time.Now().Add(-time.Hour)
 	for i := range 20 {
-		content := []byte(fmt.Sprintf("shard-%02d-content", i))
+		content := fmt.Appendf(nil, "shard-%02d-content", i)
 		name := fmt.Sprintf("s%02d.pcapng", i)
 		contents[name] = content
 		writeShard(t, spoolDir, name, base.Add(time.Duration(i)*time.Minute), content)

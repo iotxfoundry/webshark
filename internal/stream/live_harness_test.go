@@ -158,8 +158,6 @@ func (m *memSharkd) currentLoaded() string {
 	return m.loaded
 }
 
-var _ = func() int { return 0 }
-
 // countLoadOf 统计请求行中对指定分片的 load 次数。
 func countLoadOf(lines []string, shard string) int {
 	n := 0
