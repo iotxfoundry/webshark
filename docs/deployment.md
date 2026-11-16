@@ -6,25 +6,20 @@
 
 | 路径 | 归属 | 说明 |
 |---|---|---|
-| `/var/lib/webshark` | `webshark:webshark`（730） | spool 分片目录；dumpcap 需写，webshark 需读 |
+| `/var/lib/webshark` | `webshark:webshark`（750） | spool 分片目录；三进程同用户，读写无隔离 |
 | `/run/webshark` | `webshark:webshark`（750） | 运行时目录：sharkd UDS socket |
 | `/usr/local/bin/webshark` | root | 二进制（`make build` 产物拷入） |
 | `/etc/webshark/token` | `webshark:webshark`（600） | token 文件，可选 |
 
 ```sh
-sudo id dumpcap 2>/dev/null || sudo useradd -r -s /usr/sbin/nologin dumpcap
 sudo id webshark 2>/dev/null || sudo useradd -r -s /usr/sbin/nologin webshark
 sudo mkdir -p /var/lib/webshark /run/webshark /etc/webshark
 sudo chown webshark:webshark /var/lib/webshark /run/webshark /etc/webshark
-sudo chmod 730 /var/lib/webshark
-sudo chown root:dumpcap /usr/bin/dumpcap   # 发行版默认已带 filecap，可跳过
-sudo getcap /usr/bin/dumpcap               # 期望：cap_net_admin,cap_net_raw+eip
+sudo chmod 750 /var/lib/webshark
+sudo getcap /usr/bin/dumpcap               # 期望：cap_net_admin,cap_net_raw+eip（发行版默认已带 filecap，可跳过）
 ```
 
-抓包权限二选一：
-
-- **方案 A（默认 unit 采用）：`User=dumpcap` 专用用户**。dumpcap 由发行版安装时已赋 `cap_net_admin,cap_net_raw` filecap，专用无登录用户 + 文件能力即可抓包，无 root。需把 spool 目录对 dumpcap 可写（见下方 unit 的 `ExecStartPre` 授组，或直接把目录组设为 `dumpcap`）。
-- **方案 B：root 运行 + `AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN`**。适用于不想建专用用户的场景：去掉 unit 中 `User=dumpcap`，加一行 `AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN`，能力由 systemd 注入而非 filecap。两方案效果等价，取其一。
+抓包权限：unit 采用与 sharkd/webshark **同一用户 `webshark`**，dumpcap 的抓包权限来自发行版安装时赋予二进制的 `cap_net_admin,cap_net_raw` filecap，与运行用户无关，因此无权限提升。同一用户写/读 spool，分片文件（0600）天然可被 sharkd/webshark 读取。**若必须分离用户**：0600 捕获文件默认不可被其他用户读取，需额外 ACL 或轮转后 chmod，本仓不提供。
 
 ## systemd unit
 
@@ -39,10 +34,9 @@ After=network.target
 Before=webshark.service
 
 [Service]
-# 方案 A：专用用户（发行版 filecap 已含 cap_net_admin,cap_net_raw）。
-# 方案 B 替代：User=root 且加 AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
-User=dumpcap
-ExecStartPre=/usr/bin/setfacl -m u:dumpcap:rwx /var/lib/webshark
+# 与 sharkd/webshark 同一用户：同一用户写/读 spool，避免 0600 分片属主隔离。
+# 抓包权限来自发行版 filecap（cap_net_admin,cap_net_raw），与运行用户无关。
+User=webshark
 ExecStart=/usr/bin/dumpcap -i eth0 -b filesize:8388608 -b files:16 -w /var/lib/webshark/net.pcapng
 Restart=always
 RestartSec=3
@@ -59,7 +53,7 @@ WantedBy=multi-user.target
 ```
 
 - `-i eth0`：按实际网卡改；`-b filesize:8388608`（8MiB/片）与 `-b files:16` 对应 webshark 默认环窗 `-ring 16`，改一处须同步另一处。
-- 若系统无 `setfacl`，改为 `chown` 或把 spool 目录组设为 dumpcap。
+- dumpcap 需要原始能力，`NoNewPrivileges` 不设 yes（见 unit 注释）。
 
 ### sharkd.service
 
@@ -164,3 +158,4 @@ webshark 全部接口同源无前缀，可挂任意反代子路径，无需重�
 | 界面一直 401 | token 配置后 `/api/*` 必须带 token：浏览器先在录入页输入；WS 与下载走 `?token=`。核对前端录入值与 `WEBSHARK_TOKEN` 一致 |
 | 界面空白/提示未构建 | 二进制里内嵌的是旧/空 `web/dist.zip`。`make web && make build` 重新打包，或开发态用 `-web-dir web/dist` 指向刚构建的目录 |
 | 有分片但看不到新行 | dumpcap 与 `-ring` 不匹配导致旧片不轮换；或 sharkd 版本过老。确认 `-b files:16` 与 `-ring 16` 对齐 |
+| 有分片但界面空白（`/api/download` 导出 503「分片均不可读」） | 分片文件属主与 sharkd 运行用户不一致（如旧部署 `User=dumpcap` 写出 0600 属主 dumpcap 的文件）。`ls -l /var/lib/webshark` 确认属主是 `webshark`；旧文件 `chown webshark:webshark` 即可 |
