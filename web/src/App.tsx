@@ -43,18 +43,27 @@ export default function App() {
     return () => setUnauthorizedHandler(() => undefined);
   }, []);
 
-  // sharkd 可达性 + spool 分片数(顶栏状态展示); 401 由 readJSON 管线兜底, 其余失败静默
+  // sharkd 可达性 + spool 分片数(顶栏状态展示); 401 由 readJSON 管线兜底, 其余失败静默.
+  // 隐藏标签页暂停轮询(每次 poll 都会拨 sharkd + 列目录), 恢复可见/聚焦立即补拉一次.
   useEffect(() => {
     if (locked) return;
     let alive = true;
     const poll = () => {
+      if (document.hidden) return;
       fetchCaptureStatus()
         .then((s) => { if (alive) setStatus(s); })
         .catch(() => { if (alive) setStatus({ connected: false, files: [], reason: "网络不可达" }); });
     };
     poll();
     const t = window.setInterval(poll, 5000);
-    return () => { alive = false; window.clearInterval(t); };
+    document.addEventListener("visibilitychange", poll);
+    window.addEventListener("focus", poll);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", poll);
+      window.removeEventListener("focus", poll);
+    };
   }, [locked]);
 
   const fileCount = status?.files.length ?? 0;

@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Badge, Button, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle,
-  makeStyles, Spinner, tokens,
+  makeStyles, Spinner, Text, tokens,
 } from "@fluentui/react-components";
 import { Dismiss24Regular } from "@fluentui/react-icons";
 import { Virtuoso } from "react-virtuoso";
@@ -121,11 +121,17 @@ export function ExpertPanel({ fetchExpert, onFrameSelect, onClose }: {
           <div className={styles.hint}><Spinner label="正在统计专家信息…" /></div>
         ) : (
           <>
-            {/* 头部级别计数徽章(其余级别中性默认样式) */}
+            {/* 头部级别计数徽章(其余级别中性默认样式); 服务端明细超上限时追加截断提示 */}
             <div className={styles.headRow}>
               {counts.map(([s, c]) => (
                 <Badge key={s} appearance="filled" className={sevClass(s)}>{s} {c}</Badge>
               ))}
+              {(data.truncated ?? 0) > 0 && (
+                <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}
+                  title="单次最多显示前 5000 条，完整列表请在桌面 Wireshark 查看">
+                  已截断：另有 {data.truncated} 条未显示
+                </Text>
+              )}
             </div>
             <div className={styles.list}>
               {details.length === 0 ? (

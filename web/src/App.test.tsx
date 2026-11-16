@@ -66,4 +66,22 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "访问令牌" }));
     expect(screen.getByText("webshark 访问令牌")).toBeInTheDocument();
   });
+
+  it("隐藏标签页暂停 status 轮询; 恢复可见立即拉取一次", async () => {
+    vi.useFakeTimers();
+    // 隐藏: 初始 poll + interval 均跳过
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    try {
+      render(<App />);
+      await act(async () => { vi.advanceTimersByTime(5001); });
+      expect(mockedStatus).not.toHaveBeenCalled();
+      // 恢复可见 + visibilitychange → 立即 poll 一次
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
+      await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+      expect(mockedStatus).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+      delete (document as unknown as { hidden?: boolean }).hidden;
+    }
+  });
 });

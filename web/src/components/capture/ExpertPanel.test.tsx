@@ -58,6 +58,15 @@ describe("ExpertPanel", () => {
     expect(panel2.onFrameSelect).toHaveBeenLastCalledWith(1, "");
   });
 
+  it("truncated > 0 → 头部追加截断提示; truncated 缺省/0 → 不出现", async () => {
+    renderPanel(vi.fn().mockResolvedValue({ ...sample, truncated: 1000 }));
+    expect(await screen.findByText("已截断：另有 1000 条未显示")).toBeInTheDocument();
+    cleanup();
+    renderPanel();
+    await screen.findByText("Error 1");
+    expect(screen.queryByText(/已截断/)).not.toBeInTheDocument();
+  });
+
   it("空明细 → 「无专家信息」", async () => {
     renderPanel(vi.fn().mockResolvedValue({ taps: [{ tap: "expert", type: "expert", details: [] }] }));
     expect(await screen.findByText("无专家信息")).toBeInTheDocument();
