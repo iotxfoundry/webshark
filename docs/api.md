@@ -52,15 +52,17 @@ sharkd 可达性 + 环窗（最近 `-ring` 片，默认 16）分片清单（`mti
 应答：
 
 ```json
-{"ok": true, "handle": "st-xxxx", "paused": false, "filter": "", "shard": "net_00001_....pcapng"}
+{"ok": true, "handle": "st-xxxx", "paused": false, "filter": "", "shard": "net_00001_....pcapng", "cold": false}
 ```
+
+`cold=true` 表示服务端**新建**了会话（该 handle 不存在或已被淘汰）：追帧位置丢失，新会话锚定最新分片、不回放历史。前端据此清空本地视图（复用 `reset` 语义）后再渲染。
 
 流数达上限（16）时 `429`。
 
 ### GET /api/frame
 
 单帧详情，参数 `handle`、`shard`、`num`、`proto`、`bytes`，结果原样透传 sharkd `frame` 的 `result`。
-路由规则：`shard` 等于该流实时实例当前 load 的分片 → 用该流实例；否则走进程级分片缓存实例（按需 load，LRU 12 片）。
+路由规则：**一律**走进程级分片缓存实例（按显式 `shard` 按需 load，LRU 12 片）。不走流实例：worker 换分片时 `load` 与当前分片游标更新非原子，按「是否等于当前分片」分流会在轮换瞬间取到另一文件的同号帧。`shard` 缺省时取会话当前分片，仍为空则 `409`。
 
 ### POST /api/follow
 
@@ -68,7 +70,13 @@ sharkd 可达性 + 环窗（最近 `-ring` 片，默认 16）分片清单（`mti
 
 ### POST /api/tap
 
-`{"handle": "...", "tap0": "expert"}` → 透传 sharkd `tap` 的 `result`。参数键是 sharkd 的 `tap0`（`tap` 会被拒 `-32600`）。
+`{"handle": "...", "tap0": "expert"}` → 透传 sharkd `tap` 的 `result`，并在同级补注 `"shard"`：tap 实际执行时实时实例载入的分片名。参数键是 sharkd 的 `tap0`（`tap` 会被拒 `-32600`）。
+
+```json
+{"shard": "net_00001_....pcapng", "taps": [{"tap": "expert", "type": "expert", "details": []}]}
+```
+
+`shard` 为空串表示 tap 时未载入分片，或调用期间发生过换片（服务端无法判定实际文件，宁可留空也不给错分片）。前端据此定位专家条目的帧。
 
 ### GET|POST /api/check
 
@@ -131,14 +139,14 @@ WebSocket 升级，`?handle=<handle>&token=<token>`。见第 3 节。
 - **位置出环窗**（分片已被环形清理）：发 `reset` 并从当前状态全量重推。
 - **筛选模式**：先经轻查询实例校验 dfilter；非法 → `error` 帧且保持原状态；合法 → 位置归零，自环窗起点逐片走查推送（`mode:"filter"`），新分片持续按筛选推送，不暂停不丢包。
 - **背压**：出站队列有界（256 帧），满则生产端阻塞（推送速率由消费端决定），不丢帧。
-- **宽限**：连接断开后会话保留 60s，期间重连续推；超时由 janitor（5s 节拍）回收。
-- **上限**：并发流 16；建流超限 `429`。
+- **宽限**：连接断开后会话保留 60s，期间重连续推；超时由 janitor（5s 节拍）回收。**容量满时会提前淘汰最旧的断线会话**腾位（否则刷新 16 次即全员 429），被淘汰者重连得到新会话，应答带 `cold=true`。
+- **上限**：并发流 16；全部 16 条都处于连接中时建流才返回 `429`。
 
 ## 5. 进程内 sharkd 实例拓扑
 
 | 实例 | 数量 | 职责 | load |
 |---|---|---|---|
-| 流实例 | 每流一个 | 自动 load 最新分片 + 追帧推送；`/api/frame` 命中当前分片 | 当前分片 |
+| 流实例 | 每流一个 | 自动 load 最新分片 + 追帧推送；`/api/follow`、`/api/tap` | 当前分片 |
 | 轻查询实例 | 进程级 1 个 | `check` / `complete`（协议注册表全局可用） | 不 load |
 | 分片缓存实例 | 进程级 1 个 | 历史帧详情，LRU 12 片 | 按查询 load |
 

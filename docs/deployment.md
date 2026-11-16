@@ -133,6 +133,9 @@ server {
     location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
+        # 必须显式透传原始 Host：nginx 默认发 $proxy_host（上游地址），
+        # 服务端 WS 同源校验会因 Origin 与 Host 不符回 403
+        proxy_set_header Host $host;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_read_timeout 3600s;    # 长连接：WS 与流式下载不被掐断
