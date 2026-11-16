@@ -82,7 +82,7 @@ export default function CapturePage() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const session = useCaptureStream();
-  const { conn, rows, shard, filter, error, setCapturePaused, applyFilter,
+  const { conn, rows, filter, error, setCapturePaused, applyFilter,
     fetchFrame, fetchFollow, fetchExpert, checkFilter, complete } = session;
 
   // 抓包暂停/恢复: WS 上行 _ctl 流控制; conn open 时按当前态断言(重连后不丢暂停态)
@@ -135,24 +135,21 @@ export default function CapturePage() {
     setFilterInput((prev) => (prev.trim() === "" ? f : `${prev.trim()} && ${f}`));
   }, []);
 
-  // 专家信息开关(抽屉覆层). expertShard = 打开面板时刻的分片快照: tap 结果属于请求时刻
-  // 载入的分片, 必须一并捕获, 不能读点击时的 shard 状态(聚合含多片时按帧号命中歧义,
-  // 打开后轮换更会让点击落错片)
+  // 专家信息开关(抽屉覆层). 定位分片以 tap 应答为准(轮换后也可信), 打开面板无需快照
   const [expertOpen, setExpertOpen] = useState(false);
-  const [expertShard, setExpertShard] = useState("");
 
   // 专家信息行点击 → 选中该帧并拉详情. 最小实现: 不强求包列表滚动定位; 命中已持有行
-  // (按捕获分片+帧号匹配)则复用行选择获得列表高亮, 否则以捕获分片+帧号合成行仅拉详情
-  // (显示 No 以原始帧号兜底); 捕获为空(实时实例尚未就绪)不查询, 透出提示
-  const onExpertFrame = useCallback((n: number) => {
-    if (expertShard === "") {
+  // (按 tap 分片+帧号匹配)则复用行选择获得列表高亮, 否则以 tap 分片+帧号合成行仅拉详情
+  // (显示 No 以原始帧号兜底); tap 应答未载入分片(shard 空)不查询, 透出提示
+  const onExpertFrame = useCallback((n: number, shard: string) => {
+    if (shard === "") {
       setFrameErr("实时实例尚未就绪，无法定位帧");
       return;
     }
-    const r = rows.find((x) => x.ref.shard === expertShard && x.ref.num === n)
-      ?? { c: [], num: n, no: n, ref: { shard: expertShard, num: n } };
+    const r = rows.find((x) => x.ref.shard === shard && x.ref.num === n)
+      ?? { c: [], num: n, no: n, ref: { shard, num: n } };
     void onRowSelect(r);
-  }, [expertShard, rows, onRowSelect]);
+  }, [rows, onRowSelect]);
 
   // 分割拖动: 上下(topH%) 与 左右(hexW px), pointer capture 复用
   const onVDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -204,7 +201,7 @@ export default function CapturePage() {
         {paused && <Badge appearance="tint" color="warning">已暂停</Badge>}
         <div style={{ flex: 1 }} />
         <Button className={styles.btn} icon={<Info16Regular />}
-          onClick={() => { setExpertShard(shard); setExpertOpen(true); }}>
+          onClick={() => setExpertOpen(true)}>
           专家信息
         </Button>
         {/* 暂停/恢复抓包: WS 上行 _ctl 流控制(冻结推送; 落盘 spool 不受影响) */}

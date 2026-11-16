@@ -1,7 +1,8 @@
 // ExpertPanel.tsx - Expert Information 汇总(sharkd tap expert): 抽屉展示专家诊断消息.
 // 头部按 severity 文本分组计数徽章(Error 红/Warning 黄/Chat 灰, 其余中性); 明细行
-// [级别, 分组, 协议, 消息, 帧号], 行点击 → onFrameSelect(n) 由宿主选中该帧并拉详情
-// (最小实现: 不强求包列表滚动定位——目标帧可能不在已拉取游标内, 见 CapturePage.onExpertFrame).
+// [级别, 分组, 协议, 消息, 帧号], 行点击 → onFrameSelect(n, shard) 由宿主选中该帧并拉详情
+// (分片以 tap 应答为准, 轮换后也可信; 最小实现: 不强求包列表滚动定位——目标帧可能不在
+// 已拉取游标内, 见 CapturePage.onExpertFrame).
 import { useEffect, useMemo, useState } from "react";
 import {
   Badge, Button, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle,
@@ -55,8 +56,8 @@ function sevClass(s: string): string | undefined {
 export function ExpertPanel({ fetchExpert, onFrameSelect, onClose }: {
   /** 取数透传(宿主会话 hook 提供) */
   fetchExpert: () => Promise<SharkdExpertResponse>;
-  /** 明细行点击: 选中该帧(宿主拉详情) */
-  onFrameSelect: (n: number) => void;
+  /** 明细行点击: 选中该帧(宿主拉详情); shard = tap 应答的实际执行分片(空 = 未载入) */
+  onFrameSelect: (n: number, shard: string) => void;
   onClose: () => void;
 }) {
   const styles = useStyles();
@@ -91,8 +92,8 @@ export function ExpertPanel({ fetchExpert, onFrameSelect, onClose }: {
 
   const renderRow = (d: SharkdExpertDetail, i: number) => (
     <div key={`${d.f}-${i}`} className={styles.row} role="button" tabIndex={0}
-      onClick={() => onFrameSelect(d.f)}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onFrameSelect(d.f); }}>
+      onClick={() => onFrameSelect(d.f, data?.shard ?? "")}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onFrameSelect(d.f, data?.shard ?? ""); }}>
       <span><Badge size="small" appearance="filled" className={sevClass(d.s)}>{d.s}</Badge></span>
       <span>{d.g}</span>
       <span>{d.p}</span>

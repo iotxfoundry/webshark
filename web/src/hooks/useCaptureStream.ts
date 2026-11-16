@@ -19,8 +19,6 @@ import { createCaptureAggregator, type CaptureAggregator, type CaptureViewRow } 
 export function useCaptureStream() {
   const [conn, setConn] = useState<SharkdConn>("connecting");
   const [rows, setRows] = useState<CaptureViewRow[]>([]);
-  /** 当前分片标签(rows 微批归属/rotated 轮换) */
-  const [shard, setShard] = useState("");
   /** 当前生效筛选(空串 = 普通实时流) */
   const [filter, setFilter] = useState("");
   const [error, setError] = useState("");
@@ -53,11 +51,9 @@ export function useCaptureStream() {
           case "rows":
             agg.append(e.rows, e.shard);
             setRows(agg.view());
-            setShard(e.shard);
             break;
           case "rotated":
-            setShard(e.shard); // 信息性: 行数据随 rows 微批走, 无需动作
-            break;
+            break; // 信息性: 行数据随 rows 微批走, 分片归属在行内 ref, 前端无需动作
           case "reset":
             agg.reset();
             setRows(agg.view());
@@ -126,7 +122,7 @@ export function useCaptureStream() {
   }, []);
 
   return {
-    conn, rows, shard, filter, error, setError,
+    conn, rows, filter, error, setError,
     setCapturePaused, applyFilter, fetchFrame, fetchFollow, fetchExpert, checkFilter, complete,
   };
 }

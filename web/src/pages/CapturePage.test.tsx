@@ -381,18 +381,18 @@ describe("CapturePage", () => {
     expect(rpcRequests(ws)).toEqual([]);
   });
 
-  it("专家面板分片捕获: tap 打开时 shard=A, 轮换后 shard=B, 点击帧按捕获值 A 查询", async () => {
-    // 帧 9 不在 rows 内 → 点击走合成行路径, 查询 shard 必须取捕获值而非点击时的 shard 状态
+  it("专家面板分片以 tap 应答为准: tap 声明 shard=A, 点击时 shard 状态已轮换为 B, 查询用 A", async () => {
+    // 帧 9 不在 rows 内 → 点击走合成行路径, 查询 shard 必须取 tap 应答值而非点击时的 shard 状态
     const ws = await mountOpen([wire(1)], "a.pcapng");
-    // tap 打开时刻 shard=A; 之后服务端轮换(rotated) → shard 状态变为 B
-    tapReply = { taps: [{ tap: "expert", type: "expert", details: [{ f: 9, s: "Error", g: "Sequence", m: "ack", p: "TCP" }] }] };
+    // 服务端已轮换(rotated) → shard 状态变为 B; tap 应答声明实际执行分片 = A
+    act(() => { ws.push({ type: "rotated", shard: "b.pcapng" }); });
+    tapReply = { shard: "a.pcapng", taps: [{ tap: "expert", type: "expert", details: [{ f: 9, s: "Error", g: "Sequence", m: "ack", p: "TCP" }] }] };
     fireEvent.click(screen.getByRole("button", { name: "专家信息" }));
     await act(async () => { await vi.runOnlyPendingTimersAsync(); });
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByText("ack")).toBeInTheDocument(); // 面板数据就绪
-    act(() => { ws.push({ type: "rotated", shard: "b.pcapng" }); });
 
-    // 点击专家条目: frame 查询必须用捕获的 shard=A(tap 数据属于打开时刻的分片)
+    // 点击专家条目: frame 查询必须用 tap 应答的 shard=A(修复前走「打开时捕获」会是 B)
     fireEvent.click(screen.getByText("ack"));
     await act(async () => { await vi.runOnlyPendingTimersAsync(); });
     const calls = frameCalls();
@@ -402,8 +402,8 @@ describe("CapturePage", () => {
     expect(q.get("num")).toBe("9");
   });
 
-  it("专家面板降级: 实例未就绪(shard 空)点击条目不发 frame 查询, 透出提示", async () => {
-    await mountOpen([], ""); // 无 rows 推送 → shard 保持空串
+  it("专家面板降级: tap 应答无 shard(实时实例未载入)点击条目不发 frame 查询, 透出提示", async () => {
+    await mountOpen([wire(1)]); // shard 状态有值, 但 tap 应答未载入分片
     tapReply = { taps: [{ tap: "expert", type: "expert", details: [{ f: 1, s: "Error", g: "Sequence", m: "ack", p: "TCP" }] }] };
     fireEvent.click(screen.getByRole("button", { name: "专家信息" }));
     await act(async () => { await vi.runOnlyPendingTimersAsync(); });
@@ -411,7 +411,7 @@ describe("CapturePage", () => {
     expect(screen.getByText("ack")).toBeInTheDocument();
     fireEvent.click(screen.getByText("ack"));
     await act(async () => { await vi.runOnlyPendingTimersAsync(); });
-    expect(frameCalls()).toHaveLength(0); // 空捕获不查询
+    expect(frameCalls()).toHaveLength(0); // shard 为空不查询
     expect(screen.getByText(/无法定位帧/)).toBeInTheDocument();
   });
 

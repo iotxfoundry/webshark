@@ -61,10 +61,13 @@ describe("useCaptureStream", () => {
   let origWS: typeof WebSocket;
   /** subscribe 失败注入(下一轮调用起生效, 用后自动复位成功) */
   let subscribeFailOnce = false;
+  /** subscribe 应答 cold=true 注入(服务端淘汰后重建会话) */
+  let subscribeCold = false;
   /** check 400 错误文案注入(非空时 check 应答 400+该文案) */
   let checkError = "";
   beforeEach(() => {
     vi.useFakeTimers();
+    subscribeCold = false;
     origWS = window.WebSocket;
     Object.defineProperty(window, "WebSocket", { value: MockWebSocket, configurable: true, writable: true });
     MockWebSocket.instances = [];
@@ -74,7 +77,7 @@ describe("useCaptureStream", () => {
       const url = String(input);
       if (url.includes("/api/subscribe")) {
         if (subscribeFailOnce) { subscribeFailOnce = false; return { ok: false, status: 429, json: async () => ({ code: 429, message: "流数达上限" }) } as Response; }
-        return { ok: true, status: 200, json: async () => ({ ok: true, handle: "st-x", paused: false, filter: "", shard: "a.pcapng" }) } as Response;
+        return { ok: true, status: 200, json: async () => ({ ok: true, handle: "st-x", paused: false, filter: "", shard: "a.pcapng", cold: subscribeCold }) } as Response;
       }
       if (url.includes("/api/frame")) {
         const q = new URL(url, "http://localhost").searchParams; // fetch 相对 BASE_URL, 补解析基址
@@ -151,8 +154,7 @@ describe("useCaptureStream", () => {
     expect(h.result.current.conn).toBe("open");
   });
 
-  it("断线重连: 同一流句柄先 subscribe 再连(幂等保活), 续推聚合器保留", async () => {
-    const { h, ws } = await mount();
+  it("断线重连: 同一流句柄先 subscribe 再连(幂等保活), 续推聚合器保留", async () => {    const { h, ws } = await mount();
     act(() => { ws.push({ type: "rows", mode: "live", shard: "a.pcapng", rows: [wire(1)] }); });
     const handleBefore = lastHandleParam();
     act(() => { ws.close(); });
@@ -166,6 +168,24 @@ describe("useCaptureStream", () => {
     expect(h.result.current.conn).toBe("open");
     act(() => { ws2.push({ type: "rows", mode: "live", shard: "a.pcapng", rows: [wire(1), wire(2)] }); });
     expect(h.result.current.rows.map((r) => r.no)).toEqual([1, 2]); // 旧行保留 + 重叠去重
+  });
+
+  it("会话被淘汰重建(subscribe cold=true): onEvent 收 reset(session-recreated), 聚合器清空防静默断层", async () => {
+    const { h, ws } = await mount();
+    act(() => { ws.push({ type: "rows", mode: "live", shard: "a.pcapng", rows: [wire(1), wire(2)] }); });
+    expect(h.result.current.rows.map((r) => r.no)).toEqual([1, 2]);
+    // 重连时服务端已淘汰旧会话并新建(cold=true, 锚定最新分片不重放历史)
+    subscribeCold = true;
+    act(() => { ws.close(); });
+    act(() => { vi.advanceTimersByTime(1100); });
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+    const ws2 = MockWebSocket.instances[MockWebSocket.instances.length - 1];
+    act(() => { ws2.open(); });
+    // 聚合器已被 reset 清空: 旧行不残留
+    expect(h.result.current.rows).toEqual([]);
+    // 新会话续推: 从 1 重编号(旧行保留会静默跳段)
+    act(() => { ws2.push({ type: "rows", mode: "live", shard: "z.pcapng", rows: [wire(1, "z.pcapng")] }); });
+    expect(h.result.current.rows.map((r) => r.no)).toEqual([1]);
   });
 
   it("error 帧: setError(reason) 进横幅管线; 已提交筛选时撤乐观标识(filter 态回退)", async () => {
@@ -183,16 +203,14 @@ describe("useCaptureStream", () => {
     expect(h.result.current.rows).toEqual([]);
   });
 
-  it("rows 微批追加: ref 透传 + no 跨分片连续编号, shard 标签随批更新", async () => {
+  it("rows 微批追加: ref 透传 + no 跨分片连续编号", async () => {
     const { h, ws } = await mount();
     act(() => { ws.push({ type: "rows", mode: "live", shard: "a.pcapng", rows: [wire(5), wire(6)] }); });
     expect(h.result.current.rows.map((r) => r.no)).toEqual([1, 2]);
     expect(h.result.current.rows[0].ref).toEqual({ shard: "a.pcapng", num: 5 });
-    expect(h.result.current.shard).toBe("a.pcapng");
     // 新分片继续追加(编号连续, 不清不重排)
     act(() => { ws.push({ type: "rows", mode: "live", shard: "b.pcapng", rows: [wire(1, "b.pcapng")] }); });
     expect(h.result.current.rows.map((r) => r.no)).toEqual([1, 2, 3]);
-    expect(h.result.current.shard).toBe("b.pcapng");
   });
 
   it("单条 WS 消息多行 JSON Lines 多事件逐条消费", async () => {
@@ -204,7 +222,6 @@ describe("useCaptureStream", () => {
     ws.onmessage?.({ data: `${JSON.stringify({ type: "rows", mode: "live", shard: "b.pcapng", rows: [wire(1, "b.pcapng")] })}\n${JSON.stringify({ type: "rows", mode: "live", shard: "b.pcapng", rows: [wire(2, "b.pcapng")] })}` });
     await act(async () => { await Promise.resolve(); });
     expect(h.result.current.rows.map((r) => r.no)).toEqual([1, 2, 3]);
-    expect(h.result.current.shard).toBe("b.pcapng");
   });
 
   it("重复 ref 去重(重放边界重叠不产生重复行/重复号)", async () => {
@@ -214,11 +231,10 @@ describe("useCaptureStream", () => {
     expect(h.result.current.rows.map((r) => r.no)).toEqual([1, 2, 3]);
   });
 
-  it("rotated 信息性: shard 标签更新, rows 保留不动", async () => {
+  it("rotated 信息性: 不改变已收行", async () => {
     const { h, ws } = await mount();
     act(() => { ws.push({ type: "rows", mode: "live", shard: "a.pcapng", rows: [wire(1)] }); });
     act(() => { ws.push({ type: "rotated", shard: "b.pcapng" }); });
-    expect(h.result.current.shard).toBe("b.pcapng");
     expect(h.result.current.rows.map((r) => r.no)).toEqual([1]);
   });
 

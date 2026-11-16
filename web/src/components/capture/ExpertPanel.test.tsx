@@ -2,12 +2,12 @@
 // (Error 红/Warning 黄/Chat 灰/其余中性) / 明细行渲染(级别|分组|协议|消息|帧号) / 行点击
 // onFrameSelect 帧号回调 / 空明细友好文案 / 取数失败文案 / 关闭回调.
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import { FluentProvider, webDarkTheme } from "@fluentui/react-components";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";import { FluentProvider, webDarkTheme } from "@fluentui/react-components";
 import { ExpertPanel } from "./ExpertPanel";
 import type { SharkdExpertResponse } from "../../api/sharkdTypes";
 
 const sample: SharkdExpertResponse = {
+  shard: "a.pcapng",
   taps: [{
     tap: "expert", type: "expert",
     details: [
@@ -47,10 +47,15 @@ describe("ExpertPanel", () => {
     expect(screen.getByText("IP")).toBeInTheDocument();
   });
 
-  it("行点击 → onFrameSelect(帧号)", async () => {
+  it("行点击 → onFrameSelect(帧号, tap 应答分片)", async () => {
     const { onFrameSelect } = renderPanel();
     fireEvent.click(await screen.findByText("keep-alive"));
-    expect(onFrameSelect).toHaveBeenCalledWith(15);
+    expect(onFrameSelect).toHaveBeenCalledWith(15, "a.pcapng");
+    // tap 应答无 shard → 透传空串(宿主降级提示)
+    cleanup();
+    const panel2 = renderPanel(vi.fn().mockResolvedValue({ taps: [{ tap: "expert", type: "expert", details: [{ f: 1, s: "Error", g: "Sequence", m: "ack", p: "TCP" }] }] }));
+    fireEvent.click(await screen.findByText("ack"));
+    expect(panel2.onFrameSelect).toHaveBeenLastCalledWith(1, "");
   });
 
   it("空明细 → 「无专家信息」", async () => {

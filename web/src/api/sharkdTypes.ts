@@ -100,8 +100,9 @@ export interface SharkdExpertTap {
   details: SharkdExpertDetail[];
 }
 
-/** tap expert 响应 */
+/** tap expert 响应(shard = tap 实际执行时实时实例载入的分片名, 未载入为空串/缺省) */
 export interface SharkdExpertResponse {
+  shard?: string;
   taps?: SharkdExpertTap[];
 }
 

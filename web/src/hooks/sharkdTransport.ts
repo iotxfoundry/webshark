@@ -40,10 +40,13 @@ export function openSharkdTransport(ev: TransportEvents): () => void {
 
   const open = async () => {
     ev.onConn("connecting");
-    // 建流先行: subscribe 幂等(重连时确保会话在宽限期内); 失败(网络/429)同断线退避
+    // 建流先行: subscribe 幂等(重连时确保会话在宽限期内); 失败(网络/429)同断线退避.
+    // cold=true = 会话已被淘汰重建(锚定最新分片不重放历史), 本地聚合器旧行作废 →
+    // 复用 reset 契约清空对齐(首连聚合器本就为空, 清一次无副作用)
     const handle = getStreamHandle();
     try {
-      await subscribeCaptureStream(handle);
+      const r = await subscribeCaptureStream(handle);
+      if (r.cold) ev.onEvent?.({ type: "reset", reason: "session-recreated" });
     } catch {
       if (!cancelled) { ev.onConn("closed"); retry(); }
       return;

@@ -19,13 +19,16 @@ export function getStreamHandle(): string {
   return streamHandle;
 }
 
-/** subscribe 应答(服务端幂等 getOrCreate 后回读流状态) */
+/** subscribe 应答(服务端幂等 getOrCreate 后回读流状态; cold=true = 旧会话已被淘汰重建,
+ *  锚定最新分片不重放历史, 前端须 reset 清空聚合器对齐, 否则静默跳段) */
 export interface CaptureSubscribeResult {
   ok: boolean;
   handle: string;
   paused: boolean;
   filter: string;
   shard: string;
+  /** true = 服务端新建了会话(原 handle 不存在/已被淘汰), false = 复用 */
+  cold: boolean;
 }
 
 /** GET /api/status: sharkd 可达性 + spool 分片清单(顶栏状态展示用) */
