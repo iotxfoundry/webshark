@@ -1,8 +1,9 @@
 GO ?= go
 BIN := bin
 
-# 显式列包：web/node_modules 里会有第三方 Go 包，go ./... 会把它扫进构建范围
-PKGS := . ./cmd/... ./internal/... ./web
+# go.mod 的 ignore 指令已排除 web/node_modules（其内随包携带第三方 Go 文件），
+# ./... 在装/不装 node 的工作区都安全
+PKGS := ./...
 
 # 打包时归一化 mtime：内容不变则 zip 字节不变，避免无意义二进制差异
 ZIP_EPOCH := 202001010000.00

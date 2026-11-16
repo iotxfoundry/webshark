@@ -12,8 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 不装 Node：带 node_modules 的工作区里 go ./... 会扫到其中的第三方 Go 包；
-      # CI 工作区不含 node_modules，./... 安全。
+      # go.mod 的 ignore 指令已排除 web/node_modules，./... 在装/不装 node 的
+      # 工作区都安全；go job 不装 Node 仅为本 job 提速
       - uses: actions/setup-go@v5
         with:
           go-version: 1.27.x
@@ -22,7 +22,7 @@ jobs:
         run: go build ./...
 
       - name: Vet
-        run: go vet . ./internal/...
+        run: go vet ./...
 
       - name: Test
         run: go test -race ./...
