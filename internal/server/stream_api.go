@@ -14,7 +14,9 @@ import (
 )
 
 // handleSubscribe POST /api/subscribe：{handle, filter?, paused?} 建流/保活并
-// 回读流状态（handle 由前端生成并长期复用，服务端幂等）。流数达上限 429。
+// 回读流状态（handle 由前端生成并长期复用，服务端幂等）。流数达上限 429；
+// 应答带 cold：该 handle 原先没有可用会话（新建/宽限过期/已被容量淘汰），
+// 前端据此清空本地视图（追帧位置已丢失，新流锚定最新分片不回放历史）。
 func (s *Server) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Handle string  `json:"handle"`
@@ -25,9 +27,16 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, http.StatusBadRequest, "subscribe 须携带 handle")
 		return
 	}
+	// cold 判定在 GetOrCreate 之前查一次（两者非原子）：并发建同一 handle 时
+	// 两方都报 cold 只是多清一次空视图，无正确性影响
+	cold := s.mgr.Lookup(req.Handle) == nil
 	sess, err := s.mgr.GetOrCreate(req.Handle)
 	if errors.Is(err, stream.ErrStreamLimit) {
 		writeErr(w, http.StatusTooManyRequests, http.StatusTooManyRequests, err.Error())
+		return
+	}
+	if errors.Is(err, stream.ErrClosed) { // 服务已关闭：暂不可用，非内部错误
+		writeErr(w, http.StatusServiceUnavailable, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 	if err != nil {
@@ -44,14 +53,13 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"ok": true, "handle": sess.Handle(),
 		"paused": sess.Paused(), "filter": sess.Filter(),
-		"shard": sess.Shard(),
+		"shard": sess.Shard(), "cold": cold,
 	})
 }
 
 // handleFrame GET /api/frame?handle=&shard?=&num=&proto?=&bytes?=：单帧详情，
-// shard 等于该流实时实例当前分片 → 流实例查询；否则走分片缓存实例（按需 load，
-// LRU 12 片）。sharkd envelope 错误：frame 业务错 400、历史分片 load 失败 404；
-// 传输失败 503。
+// 一律走分片缓存实例（按需 load，LRU 12 片）；shard 缺省取会话当前分片，仍未
+// 就绪 409。sharkd envelope 错误：load 失败 404；传输失败 503。
 func (s *Server) handleFrame(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	sess := s.mgr.Lookup(q.Get("handle"))
@@ -90,19 +98,13 @@ func (s *Server) handleFrame(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, http.StatusBadRequest, "shard 须为纯文件名")
 		return
 	}
-	if shard != cur { // 历史行：分片缓存实例按需 load（LRU）查询
-		res, err := s.cache.frame(shard, params)
-		if err != nil {
-			writeSharkErr(w, err, http.StatusNotFound, "分片不存在或已被清理")
-			return
-		}
-		sess.Touch()
-		writeJSON(w, json.RawMessage(res))
-		return
-	}
-	res, err := sess.Call("frame", params)
+	// 不按 shard==cur 分流实时实例：worker 侧 load 与 setCurShard 两步非原子，
+	// 轮换瞬间 handler 读到旧 cur、请求落到已换文件的新实例上，会取到另一分片
+	// 的同号帧。一律走分片缓存实例（按复合键 load 目标文件后查询，无此竞态；
+	// 代价是同片首次多一次 load ≈ 百毫秒，LRU 驻留后命中零 load）。
+	res, err := s.cache.frame(shard, params)
 	if err != nil {
-		writeSharkErr(w, err, http.StatusBadRequest, "帧查询失败")
+		writeSharkErr(w, err, http.StatusNotFound, "分片不存在或已被清理")
 		return
 	}
 	sess.Touch()
@@ -143,10 +145,27 @@ func (s *Server) handleStreamRPC(method string) http.HandlerFunc {
 			return
 		}
 		delete(body, "handle")
+		before := sess.Shard() // tap 补注分片的判据（见下）
 		res, err := sess.Call(method, body)
 		if err != nil {
 			writeSharkErr(w, err, http.StatusBadRequest, "查询失败")
 			return
+		}
+		if method == "tap" { // 同级补注实际载入分片：前端无从得知 sharkd 会话此刻
+			// load 的文件（轮换瞬间猜测必错），服务端权威告知。调用前后不一致说明
+			// tap 期间发生过换片，无法判定实际文件 —— 留空让前端提示而非给错分片
+			var obj map[string]json.RawMessage
+			if json.Unmarshal(res, &obj) == nil {
+				loaded := before
+				if sess.Shard() != before {
+					loaded = ""
+				}
+				shard, _ := json.Marshal(loaded)
+				obj["shard"] = shard
+				if b, merr := json.Marshal(obj); merr == nil {
+					res = b
+				} // 解析/重编码失败原样透传，不因附加键报错
+			}
 		}
 		sess.Touch()
 		writeJSON(w, json.RawMessage(res))

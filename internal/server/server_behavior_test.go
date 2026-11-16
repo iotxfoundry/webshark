@@ -397,8 +397,8 @@ func TestFrame(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, code)
 	})
 
-	t.Run("实时分片走会话实例且proto透传", func(t *testing.T) {
-		_, ts, spoolDir, _ := newServer(t, nil)
+	t.Run("当前分片也走缓存实例且只load一次", func(t *testing.T) {
+		_, ts, spoolDir, sock := newServer(t, nil)
 		writeShard(t, spoolDir, "live.pcapng", base, []byte("pcap"))
 		// WS 接入（建流并解锁 worker 追帧：无连接会话冻结不 load）
 		ws, err := dialWS(t, ts, nil, "handle=st-live")
@@ -409,10 +409,12 @@ func TestFrame(t *testing.T) {
 			_, body := postJSON(t, ts, "/api/subscribe", `{"handle":"st-live"}`)
 			return body["shard"] == "live.pcapng"
 		}, 10*time.Second, 50*time.Millisecond, "实时实例未就绪")
-		code, body := getJSON(t, ts, "/api/frame?handle=st-live&num=7&proto=true")
+		before := sock.loadCount("live.pcapng")
+		code, body := getJSON(t, ts, "/api/frame?handle=st-live&shard=live.pcapng&num=7&proto=true")
 		require.Equal(t, http.StatusOK, code)
 		require.Equal(t, float64(7), body["num"])
 		require.Equal(t, "live.pcapng", body["loaded"])
+		require.Equal(t, before+1, sock.loadCount("live.pcapng")) // 缓存实例 load 恰一次
 	})
 
 	t.Run("历史分片走缓存实例且LRU", func(t *testing.T) {
