@@ -5,6 +5,7 @@
 package stream
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -385,7 +386,7 @@ func TestFilterLightQueryParallelBackfill(t *testing.T) {
 
 	// check：不被追帧排队（独立轻查询实例）
 	start := time.Now()
-	res, err := mgr.Light().Call("check", map[string]string{"filter": "tcp"})
+	res, err := mgr.Light().Call(context.Background(), "check", map[string]string{"filter": "tcp"})
 	require.NoError(t, err)
 	require.JSONEq(t, `{"err":0}`, string(res))
 	require.Less(t, time.Since(start), 1500*time.Millisecond, "check 不得排队于追帧之后")

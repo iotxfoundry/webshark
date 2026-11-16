@@ -4,15 +4,18 @@
 package server
 
 import (
+	"context"
 	"net/http"
 
-	"github.com/iotxfoundry/webshark/internal/sharkd"
 	"github.com/iotxfoundry/webshark/internal/spool"
+	"github.com/iotxfoundry/webshark/sharkd"
 )
 
 // handleStatus GET /api/status。
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	connected := sharkd.Probe(s.cfg.SharkdSock, statusProbeTimeout)
+	probeCtx, cancel := context.WithTimeout(r.Context(), statusProbeTimeout)
+	defer cancel()
+	connected := sharkd.Probe(probeCtx, s.cfg.SharkdSock)
 	body := map[string]any{"connected": connected,
 		// 与实时流同窗口：环外遗留分片（dumpcap 重启换代残留）不进计数。
 		"files": spool.Ring(s.cfg.SpoolDir, s.cfg.RingSize)}

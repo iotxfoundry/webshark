@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iotxfoundry/webshark/internal/sharkd"
 	"github.com/iotxfoundry/webshark/internal/spool"
+	"github.com/iotxfoundry/webshark/sharkd"
 )
 
 const (

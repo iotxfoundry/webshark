@@ -7,7 +7,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/iotxfoundry/webshark/internal/sharkd"
+	"github.com/iotxfoundry/webshark/sharkd"
 )
 
 // writeErr 错误应答（status 与 message 见 docs/api.md 第 1 节）。

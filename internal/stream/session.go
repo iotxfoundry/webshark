@@ -13,7 +13,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/iotxfoundry/webshark/internal/sharkd"
+	"github.com/iotxfoundry/webshark/sharkd"
 )
 
 // maxOutQueue 出站队列帧数上限：积压到此即触发背压阻塞。
@@ -167,7 +167,8 @@ func (s *Session) Call(method string, params any) (json.RawMessage, error) {
 	if s.shark == nil {
 		s.shark = sharkd.NewClient(s.m.cfg.Sock)
 	}
-	return s.shark.Call(method, params)
+	// 会话 ctx：会话关闭即取消在途请求（连接随之丢弃），调用方得到 ctx 错误
+	return s.shark.Call(s.ctx, method, params)
 }
 
 // closeShark 关停专属实例（worker 退出即关连接）。

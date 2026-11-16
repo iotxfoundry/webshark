@@ -2,6 +2,7 @@ package sharkd
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -83,7 +84,7 @@ func TestCallOKAndIncrementingID(t *testing.T) {
 	)
 	c := NewClient(f.ln.Addr().String())
 	for i, want := range []int{1, 2} {
-		res, err := c.Call("test", nil)
+		res, err := c.Call(context.Background(), "test", nil)
 		require.NoError(t, err, i)
 		require.JSONEq(t, fmt.Sprintf(`{"n":%d}`, want), string(res))
 	}
@@ -97,7 +98,7 @@ func TestCallEnvelopeError(t *testing.T) {
 		},
 	)
 	c := NewClient(f.ln.Addr().String())
-	_, err := c.Call("load", nil)
+	_, err := c.Call(context.Background(), "load", nil)
 	require.Error(t, err)
 	var se *Error
 	require.ErrorAs(t, err, &se)
@@ -127,7 +128,7 @@ func TestMultiLineResponse(t *testing.T) {
 		}
 	}()
 	c := NewClient(ln.Addr().String())
-	res, err := c.Call("test", nil)
+	res, err := c.Call(context.Background(), "test", nil)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"ok":true}`, string(res))
 }
@@ -142,20 +143,59 @@ func TestReconnectAfterDrop(t *testing.T) {
 		},
 	)
 	c := NewClient(f.ln.Addr().String())
-	res, err := c.Call("t1", nil)
+	res, err := c.Call(context.Background(), "t1", nil)
 	require.NoError(t, err)
 	require.JSONEq(t, `"a"`, string(res))
-	require.NoError(t, c.Close()) // 断线
-	res, err = c.Call("t2", nil)  // 自动重拨, id 继续自增 → 命中 handler[1]
+	require.NoError(t, c.Close())                      // 断线
+	res, err = c.Call(context.Background(), "t2", nil) // 自动重拨, id 继续自增 → 命中 handler[1]
 	require.NoError(t, err)
 	require.JSONEq(t, `"b"`, string(res))
 	require.Equal(t, 2, c.nextID)
 }
 
 func TestProbe(t *testing.T) {
-	require.False(t, Probe(filepath.Join(t.TempDir(), "nope.sock"), 200*time.Millisecond))
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	require.False(t, Probe(ctx, filepath.Join(t.TempDir(), "nope.sock")))
 	f := newFakeSharkd(t)
-	require.True(t, Probe(f.ln.Addr().String(), 200*time.Millisecond))
+	require.True(t, Probe(ctx, f.ln.Addr().String()))
+}
+
+func TestCallContextCanceled(t *testing.T) {
+	// 已取消的 ctx → 立即返回 context.Canceled；socket 路径不存在，若误拨号
+	// 返回的会是拨号错误而非 ctx 错误。
+	c := NewClient(filepath.Join(t.TempDir(), "nope.sock"))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := c.Call(ctx, "test", nil)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestCallContextDeadline(t *testing.T) {
+	// 假服务端 accept 后不响应：ctx 100ms 超时须在 1s 内返回 DeadlineExceeded
+	// （读失败后回读 ctx.Err()，而非读超时错误）。
+	ln, err := net.Listen("unix", filepath.Join(t.TempDir(), "sharkd.sock"))
+	require.NoError(t, err)
+	defer func() { _ = ln.Close() }()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				time.Sleep(2 * time.Second) // 故意不应答，保活连接
+				_ = c.Close()
+			}(conn)
+		}
+	}()
+	c := NewClient(ln.Addr().String())
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err = c.Call(ctx, "test", nil)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Less(t, time.Since(start), time.Second)
 }
 
 func TestRequestShape(t *testing.T) {
@@ -168,7 +208,7 @@ func TestRequestShape(t *testing.T) {
 		return map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": nil}
 	})
 	c := NewClient(f.ln.Addr().String())
-	_, err := c.Call("status", map[string]any{"x": 1})
+	_, err := c.Call(context.Background(), "status", map[string]any{"x": 1})
 	require.NoError(t, err)
 	mu.Lock()
 	defer mu.Unlock()

@@ -8,7 +8,7 @@ package stream
 import (
 	"errors"
 
-	"github.com/iotxfoundry/webshark/internal/sharkd"
+	"github.com/iotxfoundry/webshark/sharkd"
 )
 
 // enqueueError 下发错误提示帧（筛选校验失败等 UI 提示场景）。
@@ -31,7 +31,7 @@ func (m *Manager) applyFilter(s *Session, f string, pos *streamPos, b *batch) {
 		*pos = streamPos{shard: m.latestShard()}
 		return
 	}
-	if _, err := m.Light().Call("check", map[string]string{"filter": f}); err != nil {
+	if _, err := m.Light().Call(s.ctx, "check", map[string]string{"filter": f}); err != nil {
 		var se *sharkd.Error
 		if errors.As(err, &se) {
 			s.enqueueError("filter 校验失败: " + se.Message)

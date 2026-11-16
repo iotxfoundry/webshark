@@ -42,7 +42,7 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.lightCall(w, "check", map[string]string{"filter": in["filter"]})
+	s.lightCall(w, r, "check", map[string]string{"filter": in["filter"]})
 }
 
 // handleComplete GET|POST /api/complete：dfilter 补全。
@@ -67,12 +67,12 @@ func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request) {
 	if prefix != "" {
 		params["pref"] = prefix
 	}
-	s.lightCall(w, "complete", params)
+	s.lightCall(w, r, "complete", params)
 }
 
 // lightCall 轻查询实例调用并应答（JSON 透传）。
-func (s *Server) lightCall(w http.ResponseWriter, method string, params map[string]string) {
-	res, err := s.mgr.Light().Call(method, params)
+func (s *Server) lightCall(w http.ResponseWriter, r *http.Request, method string, params map[string]string) {
+	res, err := s.mgr.Light().Call(r.Context(), method, params)
 	if err != nil {
 		writeSharkErr(w, err, http.StatusBadRequest, "查询失败")
 		return

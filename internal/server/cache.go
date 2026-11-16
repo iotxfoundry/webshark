@@ -5,12 +5,13 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"slices"
 	"sync"
 
-	"github.com/iotxfoundry/webshark/internal/sharkd"
+	"github.com/iotxfoundry/webshark/sharkd"
 )
 
 // shardCacheCap LRU 容量（驻留分片数）：环窗 16 片取 12，覆盖约 3/4 回看窗口
@@ -31,7 +32,7 @@ func newShardCache(sock, spoolDir string) *shardCache {
 }
 
 // frame load 目标分片（未驻留时）后查单帧；返回 sharkd envelope 的 result。
-func (c *shardCache) frame(shard string, params map[string]any) (json.RawMessage, error) {
+func (c *shardCache) frame(ctx context.Context, shard string, params map[string]any) (json.RawMessage, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.c == nil {
@@ -41,7 +42,7 @@ func (c *shardCache) frame(shard string, params map[string]any) (json.RawMessage
 		c.lru = append(c.lru[:i], c.lru[i+1:]...)
 		c.lru = append(c.lru, shard)
 	} else {
-		if _, err := c.c.Call("load", map[string]string{"file": filepath.Join(c.dir, shard)}); err != nil {
+		if _, err := c.c.Call(ctx, "load", map[string]string{"file": filepath.Join(c.dir, shard)}); err != nil {
 			return nil, err
 		}
 		c.lru = append(c.lru, shard)
@@ -49,7 +50,7 @@ func (c *shardCache) frame(shard string, params map[string]any) (json.RawMessage
 			c.lru = c.lru[1:]
 		}
 	}
-	return c.c.Call("frame", params)
+	return c.c.Call(ctx, "frame", params)
 }
 
 // Close 关停缓存实例连接。幂等。

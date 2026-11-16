@@ -107,7 +107,7 @@ func (s *Server) handleFrame(w http.ResponseWriter, r *http.Request) {
 	// 轮换瞬间 handler 读到旧 cur、请求落到已换文件的新实例上，会取到另一分片
 	// 的同号帧。一律走分片缓存实例（按复合键 load 目标文件后查询，无此竞态；
 	// 代价是同片首次多一次 load ≈ 百毫秒，LRU 驻留后命中零 load）。
-	res, err := s.cache.frame(shard, params)
+	res, err := s.cache.frame(r.Context(), shard, params)
 	if err != nil {
 		writeSharkErr(w, err, http.StatusNotFound, "分片不存在或已被清理")
 		return
