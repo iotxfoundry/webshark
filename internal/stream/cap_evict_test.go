@@ -1,6 +1,6 @@
-// cap_evict_test.go - 流上限淘汰语义回归：满额时断线（无连接）停放会话可被
-// 淘汰腾位——前端每次刷新生成新 handle，60s 宽限内 16 次刷新即满员，不淘汰
-// 则全员 429 卡死；全部已连接才是真上限。
+// cap_evict_test.go - 流上限淘汰语义：满额时断线（无连接）停放会话可被淘汰
+// 腾位——前端每次刷新生成新 handle，60s 宽限内 16 次刷新即满员，不淘汰则全员
+// 429 卡死；全部已连接才是真上限。
 package stream
 
 import (
@@ -12,7 +12,7 @@ import (
 )
 
 // TestStreamCapEvictsDetached 锁定满额淘汰：maxStreams 个未连接（断线停放）
-// 会话占满后，新 handle 建流须淘汰最旧断线会话并成功（修复前直接 429）。
+// 会话占满后，新 handle 建流须淘汰最旧断线会话并成功（断线会话只停放游标）。
 func TestStreamCapEvictsDetached(t *testing.T) {
 	mgr := newManager(t, filepath.Join(t.TempDir(), "absent.sock"), t.TempDir())
 	for i := range maxStreams {

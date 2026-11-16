@@ -94,7 +94,7 @@ type FramesParams struct {
 	// Refs 逗号分隔、升序排列的时间参考帧号列表（如 "1,5,100"）。
 	Refs string `json:"refs,omitempty"`
 	// Columns 自定义列集，展开为 column0..columnN（给出即替换默认列集，数量任意）。
-	// 元素取值二选一：列格式编号（源码枚举 0..3 可用；4 即 COL_CUSTOM，用编号
+	// 元素取值二选一：列格式编号（0..3 可用；4 是 COL_CUSTOM 的枚举值，用编号
 	// 会被拒 "Column definition invalid"）或自定义列 "<dfilter>:<occurrence>"
 	// （如 "frame.number:1"）。
 	Columns []string `json:"-"`
@@ -119,8 +119,8 @@ type FrameRow struct {
 }
 
 // FrameParams frame 的参数（frame 必填）。布尔参数为存在即开启（sharkd 只看
-// 键是否存在，故一律 omitempty）。注意 hidden：4.6.x 源码读的是 "v"，"hidden"
-// 能过参数校验但在该版本可能不生效（上游缺陷），此处按参数表命名。
+// 键是否存在，故一律 omitempty）。注意 Hidden：4.6.x 实际读取的键是 "v"，
+// "hidden" 能通过参数校验但不生效（上游缺陷），此处仍按协议声明命名。
 type FrameParams struct {
 	// Frame 帧号（必填，正整数）。
 	Frame uint32 `json:"frame"`
@@ -173,9 +173,9 @@ type TreeNode struct {
 	// H/I 字节区间 [start,len]。
 	H []int `json:"h,omitempty"`
 	I []int `json:"i,omitempty"`
-	// P 字节区间 [start,len]（源码标注 RESERVED，保留字段）。
+	// P 字节区间 [start,len]（协议预留字段，当前无含义）。
 	P []int `json:"p,omitempty"`
-	// E 子树 ett 索引（源码 doc 标 "字段取值"，实测协议树节点为 ett 索引）。
+	// E 子树 ett 索引（协议树内部的字段/子树编号）。
 	E int64 `json:"e,omitempty"`
 	// T 节点类型（"proto"、"framenum"、"url"）。
 	T string `json:"t,omitempty"`
@@ -271,11 +271,11 @@ type FollowPayload struct {
 	N int64 `json:"n"`
 	// D 该帧方向上的载荷数据。
 	D []byte `json:"d"`
-	// S 非 0 表示该分片由服务端发出（源码 anyf "1" 输出数字）。
+	// S 非 0 表示该分片由服务端发出（sharkd 输出数字 1 而非布尔）。
 	S int `json:"s,omitempty"`
 }
 
-// TapParams tap 的参数：Taps 展开为 tap0..tapN（源码最多 16 路，超出报错；
+// TapParams tap 的参数：Taps 展开为 tap0..tapN（最多 16 路，超出报错；
 // 多路时 sharkd 按序返回 taps 数组）。
 type TapParams struct {
 	// Taps tap 名列表（取自 info.taps 等，如 "expert"、"stat:http"）。
@@ -333,8 +333,7 @@ type IntervalsResult struct {
 }
 
 // IOGraphParams iograph 的参数。Graphs 必填（graph0），展开为 graph0..graph9
-// （源码最多 10 路）；Filters/AOT 按下标与 Graphs 对齐，展开为 filter0..9、
-// aot0..9。
+// （最多 10 路）；Filters/AOT 按下标与 Graphs 对齐，展开为 filter0..9、aot0..9。
 type IOGraphParams struct {
 	// Interval 桶宽（默认 1000）。
 	Interval uint32 `json:"-"`
@@ -402,7 +401,7 @@ type PrefValue struct {
 	UB *uint32 `json:"ub,omitempty"`
 	// B PREF_BOOL 当前值（0/1）。
 	B *int `json:"b,omitempty"`
-	// S PREF_STRING/文件名/目录/密码/dissector 类的当前值（形状按源码，未单独实测）。
+	// S PREF_STRING/文件名/目录/密码/dissector 类的当前值（字符串形态）。
 	S string `json:"s,omitempty"`
 	// E PREF_ENUM 可选值列表。
 	E []PrefEnumVal `json:"e,omitempty"`
@@ -415,7 +414,7 @@ type PrefValue struct {
 // PrefEnumVal PREF_ENUM 的单个可选值（s=1 表示当前选中）。
 type PrefEnumVal struct {
 	V int `json:"v"`
-	// S 当前选中标记（1 = 选中，源码 anyf "1" 输出数字）。
+	// S 当前选中标记（1 = 选中，sharkd 输出数字而非布尔）。
 	S int `json:"s,omitempty"`
 	// D 该取值的描述。
 	D string `json:"d"`

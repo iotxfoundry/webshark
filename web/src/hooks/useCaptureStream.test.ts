@@ -139,7 +139,7 @@ describe("useCaptureStream", () => {
   it("subscribe 失败: 不建 WS, conn=closed, 退避后重试 subscribe 再连", async () => {
     subscribeFailOnce = true;
     const h = renderHook(() => useCaptureStream());
-    // 仅排干微任务(subscribe 失败路径), 不推进定时器(退避重试由下一步显式触发)
+    // 仅排干微任务(subscribe 失败路径), 不推进定时器(退避重试由用例显式触发)
     await act(async () => { await Promise.resolve(); });
     expect(subscribeCalls()).toHaveLength(1);
     expect(MockWebSocket.instances).toHaveLength(0); // 不建 WS

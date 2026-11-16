@@ -1,4 +1,4 @@
-// sharkdTypes.ts - sharkd JSON-RPC 响应类型(协议形状以 sharkd_session.c 源码级行为为准).
+// sharkdTypes.ts - sharkd JSON-RPC 响应类型(字段与键名保持协议原文).
 // 注意: sharkd 输出所有 bool 为字符串 "true"(frames 的 i/m/ct 等), 前端按字符串判定.
 
 /** frames 每帧行: c = 列字符串数组(顺序 = sharkd 当前文件列集), num = 帧号 */

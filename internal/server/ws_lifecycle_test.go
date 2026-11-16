@@ -1,5 +1,5 @@
-// ws_lifecycle_test.go - WS 生命周期回归：满队列重连不死锁（写协程先于 Enqueue
-// 启动）+ 死连接回收（pongWait 读超时 → 服务端主动断开 → 宽限回收）。
+// ws_lifecycle_test.go - WS 生命周期契约：满队列重连不死锁（出队消费者须先
+// 就位）+ 死连接回收（pongWait 读超时 → 服务端主动断开 → 宽限回收）。
 package server
 
 import (
@@ -13,7 +13,7 @@ import (
 )
 
 // TestWSHelloAfterFullQueue 锁定重连不死锁：出站队列已满 256 帧时接入，hello
-// 须在 2s 内送达——修复前 Enqueue(hello) 在唯一消费者启动前永久阻塞。
+// 须在 2s 内送达：队列满时 Enqueue 阻塞，出队消费者必须已经就位。
 func TestWSHelloAfterFullQueue(t *testing.T) {
 	srv, ts, _, _ := newServer(t, nil)
 	sess, err := srv.mgr.GetOrCreate("h-full")

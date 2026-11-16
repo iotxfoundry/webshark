@@ -1,6 +1,6 @@
-// stream_fix_test.go - 修复回归：/api/frame 一律走分片缓存实例（分流竞态）、
-// /api/tap 响应补注实际载入分片、Manager.Close 后 subscribe 503、0 字节分片
-// download 200、tap 明细截断（maxTapDetails + truncated）。
+// stream_api_test.go - 流接口契约：/api/frame 一律走分片缓存实例、/api/tap
+// 响应补注实际载入分片、Manager.Close 后 subscribe 503、0 字节分片 download
+// 200、tap 明细截断（maxTapDetails + truncated）。
 package server
 
 import (

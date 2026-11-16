@@ -1,5 +1,5 @@
 // CaptureTreeView.tsx - 协议树详情(懒展开): flattenTree 行投影 + react-virtuoso 虚拟滚动.
-// 页头由 CapturePage treePane paneHead 唯一承担(修复前组件内部自渲染头与页头叠加成两个头).
+// 页头由 CapturePage 的 treePane paneHead 统一渲染, 组件内不自绘头(避免双头叠加).
 // 交互: 点行 → onNodeSelect(hex 高亮该节点 h/i 区间); 点"作为过滤器"钮 → onFilter 应用节点 f 串.
 // 展开态: 以稳定路径键(父链 f 串+兄弟下标, 见 captureTree)保留——换帧节点对象全新但同字段
 // 路径键不变, 展开态跨帧继承不全塌; 每棵新树顶层协议级默认展开(同 Wireshark).

@@ -211,7 +211,7 @@ describe("CapturePacketList 滚动跟随透传", () => {
     expect(props.followOutput).toBe(false);
   });
 
-  it("atBottomStateChange(false) → 不再取消跟随(状态推断退役, 回归钉死); (true) → onFollowResume 照旧", () => {
+  it("atBottomStateChange(false) 不取消跟随(取消只由原生 scroll 方向判定); (true) → onFollowResume", () => {
     const onCancel = vi.fn();
     const onResume = vi.fn();
     const props = renderVirtual(true, onCancel, onResume) as {
@@ -356,6 +356,6 @@ describe("CapturePacketList 视口归底(P1/P2)", () => {
     expect(refObj.current!.scrollToIndex).toHaveBeenCalledWith({ index: rows2.length - 1, align: "end" });
   });
 
-  // 旧"rows 非空 → atBottomStateChange(false) 取消"对照用例已退役: false→cancel 路径本轮
-  // 整体删除, 用户上滚主路径由上方"原生 scroll 方向判定"① 用例钉死
+  // false→cancel 路径不存在: 底部状态无法区分用户上滚与初始填充/程序滚动,
+  // 取消跟随即由上方"原生 scroll 方向判定"用例覆盖
 });

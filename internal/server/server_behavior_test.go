@@ -1,4 +1,4 @@
-// server_behavior_test.go - HTTP 服务层行为锁定回归网：经公开路由与进程内假
+// server_behavior_test.go - HTTP 服务层行为锁定网：经公开路由与进程内假
 // sharkd（UDS，load=会话快照语义）驱动，只锁可观察行为（status 清单排序 /
 // download 拼接 / subscribe / frame 路由与 LRU / follow·tap 透传 / 轻查询 /
 // WS 门禁 / 鉴权 / 静态回落），不引用内部实现细节。

@@ -68,7 +68,7 @@ describe("CapturePage", () => {
     frameHold = null;
     tapReply = { taps: [] };
     setToken("tk-page");
-    // fetch 路由: subscribe(建流)/frame(详情)/check/complete 放行; 其余 URL(含旧路径)throw 暴露回归
+    // fetch 路由: subscribe(建流)/frame(详情)/check/complete 放行; 其余 URL throw 暴露未预期请求
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/subscribe")) {
@@ -366,7 +366,7 @@ describe("CapturePage", () => {
     await act(async () => { await Promise.resolve(); });
     expect(resolvers).toHaveLength(2);
 
-    // 先 resolve B(快) 再 resolve A(慢): 修复前 A 迟到覆盖 B
+    // 先 resolve B(快) 再 resolve A(慢): A 迟到不得覆盖 B
     resolvers[1]({ tree: [{ l: "IPv4 Header" }], bytes: "AgM=" });
     await act(async () => { await vi.runOnlyPendingTimersAsync(); });
     await act(async () => { await Promise.resolve(); });
@@ -392,7 +392,7 @@ describe("CapturePage", () => {
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByText("ack")).toBeInTheDocument(); // 面板数据就绪
 
-    // 点击专家条目: frame 查询必须用 tap 应答的 shard=A(修复前走「打开时捕获」会是 B)
+    // 点击专家条目: frame 查询必须用 tap 应答的 shard=A, 不得用本地 shard 状态(B)
     fireEvent.click(screen.getByText("ack"));
     await act(async () => { await vi.runOnlyPendingTimersAsync(); });
     const calls = frameCalls();

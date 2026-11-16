@@ -15,7 +15,7 @@ import (
 )
 
 // TestDownloadUnreadableShard503 分片均不可读（如 chmod 000）时 download 应
-// 503（修复前：200 + 0 字节 + attachment 头）。
+// 503，而不是带 attachment 头的 200 空附件。
 func TestDownloadUnreadableShard503(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root 忽略文件权限")
@@ -33,7 +33,7 @@ func TestDownloadUnreadableShard503(t *testing.T) {
 }
 
 // TestRingWindowStatusAndDownload status/download 与实时流同用环窗：目录 20 片
-// 时 status files=16、download 只拼最新 16 片（修复前：全部 20 片）。
+// 时 status files=16、download 只拼最新 16 片，环外旧片不参与。
 func TestRingWindowStatusAndDownload(t *testing.T) {
 	_, ts, spoolDir, _ := newServer(t, nil)
 	contents := make(map[string][]byte, 20)
