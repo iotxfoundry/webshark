@@ -63,6 +63,23 @@ make image        # = make build + docker build -f build/Dockerfile
 
 镜像内即含三件套（`dumpcap`/`sharkd` 来自 Debian testing 的 wireshark-common 4.6.x；`webshark` 二进制在编译期内嵌前端），构建为单阶段打包本地产物，无多阶段构建。
 
+### iframe 嵌入（宿主注入令牌与主题）
+
+页面经 `window.self !== window.top` 自动识别嵌入形态并隐藏自身品牌；令牌与主题由宿主经 postMessage 注入，页面不提供切换入口，也不落盘：
+
+```js
+const win = document.querySelector('iframe').contentWindow;
+// iframe onload 后（或收到 {type:"webshark:ready"} 后）注入:
+win.postMessage({ type: 'webshark:set-token', token: '<宿主JWT>' }, '*');
+win.postMessage({ type: 'webshark:set-theme', theme: 'light' }, '*');  // 宿主主题切换时重发
+// iframe 内遇到 401 时会上报:
+window.addEventListener('message', e => {
+  if (e.data?.type === 'webshark:unauthorized') refreshTokenAndResend();
+});
+```
+
+令牌与主题均由宿主管（iframe 内不落盘），宿主登出/换肤后重发即可；完整协议见 `web/ui/DESIGN.md`。
+
 抓宿主机物理网卡（`--network host` 才能看到物理网卡；抓包需授予网络能力；spool 建议挂持久卷）：
 
 ```sh
