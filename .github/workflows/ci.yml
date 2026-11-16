@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # go.mod 的 ignore 指令已排除 web/node_modules，./... 在装/不装 node 的
+      # go.mod 的 ignore 指令已排除 web/ui/node_modules，./... 在装/不装 node 的
       # 工作区都安全；go job 不装 Node 仅为本 job 提速
       - uses: actions/setup-go@v5
         with:
@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: web
+        working-directory: web/ui
     steps:
       - uses: actions/checkout@v4
 

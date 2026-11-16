@@ -86,17 +86,17 @@ make fmt      # gofmt -l -w .
 前端开发（React 18 + Fluent UI v9 + Vite 6 + TypeScript，yarn 4）：
 
 ```sh
-cd web
+cd web/ui
 yarn install --immutable
 yarn typecheck && yarn test && yarn lint
 yarn dev            # 开发服务器
-yarn build          # 产物输出 web/dist/（入库的是 make web 打出的 dist.zip）
+yarn build          # 产物输出 web/ui/dist/（入库的是 make web 打出的 dist.zip）
 ```
 
 后端开发时可用磁盘目录替代内嵌产物：
 
 ```sh
-go run ./cmd/webshark -web-dir web/dist
+go run ./cmd/webshark -web-dir web/ui/dist
 ```
 
 嵌入到已有 Go 服务：

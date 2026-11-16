@@ -1,7 +1,7 @@
 GO ?= go
 BIN := bin
 
-# go.mod 的 ignore 指令已排除 web/node_modules（其内随包携带第三方 Go 文件），
+# go.mod 的 ignore 指令已排除 web/ui/node_modules（其内随包携带第三方 Go 文件），
 # ./... 在装/不装 node 的工作区都安全
 PKGS := ./...
 
@@ -19,9 +19,9 @@ build:
 
 # 前端构建并打包为 web/dist.zip（入库产物，供 //go:embed 使用）
 web:
-	cd web && yarn install --immutable && yarn build
-	find web/dist -exec touch -t $(ZIP_EPOCH) {} +
-	cd web/dist && rm -f ../dist.zip && zip -qr -X ../dist.zip .
+	cd web/ui && yarn install --immutable && yarn build
+	find web/ui/dist -exec touch -t $(ZIP_EPOCH) {} +
+	cd web/ui/dist && rm -f ../../dist.zip && zip -qr -X ../../dist.zip .
 
 test:
 	$(GO) test $(PKGS)
@@ -34,4 +34,4 @@ fmt:
 
 # 只清构建产物；web/dist.zip 是入库产物，不在此列（用 make web 重新生成）
 clean:
-	rm -rf $(BIN) web/dist
+	rm -rf $(BIN) web/ui/dist

@@ -6,11 +6,11 @@
 *.out
 coverage.*
 
-# 前端：构建中间产物不入库，入库的是打包后的 web/dist.zip
-web/node_modules/
-web/dist/
-web/.yarn/*
-!web/.yarn/releases/
+# 前端源码在 web/ui：构建中间产物不入库，入库的是打包后的 web/dist.zip
+web/ui/node_modules/
+web/ui/dist/
+web/ui/.yarn/*
+!web/ui/.yarn/releases/
 
 # 编辑器与本地环境
 .idea/
