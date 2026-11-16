@@ -29,6 +29,9 @@ const (
 // ErrStreamLimit 流数达上限（GetOrCreate 返回，服务端映射 429）。
 var ErrStreamLimit = errors.New("实时流数已达上限(" + strconv.Itoa(maxStreams) + ")")
 
+// ErrClosed 管理器已关闭（GetOrCreate 返回，服务端映射 503）。
+var ErrClosed = errors.New("服务已关闭")
+
 // Config 管理器配置。
 type Config struct {
 	Sock     string       // sharkd UDS
@@ -48,6 +51,7 @@ type Manager struct {
 
 	mu       sync.Mutex
 	sessions map[string]*Session
+	closed   bool
 
 	watch       *spool.Watcher
 	stopJanitor chan struct{}
@@ -78,6 +82,9 @@ func NewManager(cfg Config) *Manager {
 func (m *Manager) GetOrCreate(handle string) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.closed {
+		return nil, ErrClosed
+	}
 	if s, ok := m.sessions[handle]; ok {
 		return s, nil
 	}
@@ -169,6 +176,7 @@ func (m *Manager) Close() {
 		close(m.stopJanitor)
 		<-m.janitorDone
 		m.mu.Lock()
+		m.closed = true // 摘表前置位：GetOrCreate 锁内判定，此后不再建流
 		sessions := make([]*Session, 0, len(m.sessions))
 		for h, s := range m.sessions {
 			sessions = append(sessions, s)
