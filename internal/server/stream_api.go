@@ -13,6 +13,11 @@ import (
 	"github.com/iotxfoundry/webshark/internal/stream"
 )
 
+// maxTapDetails 单次 tap 明细上限，按帧序保留前 N 条：界面上万条明细也无法
+// 人工阅读，超出部分由 Wireshark 桌面端查看——传输与 JSON 解析随分片大小
+// 线性增长（8MB 分片实测 72000 条 ≈ 6.5MB）。
+const maxTapDetails = 5000
+
 // handleSubscribe POST /api/subscribe：{handle, filter?, paused?} 建流/保活并
 // 回读流状态（handle 由前端生成并长期复用，服务端幂等）。流数达上限 429；
 // 应答带 cold：该 handle 原先没有可用会话（新建/宽限过期/已被容量淘汰），
@@ -153,7 +158,8 @@ func (s *Server) handleStreamRPC(method string) http.HandlerFunc {
 		}
 		if method == "tap" { // 同级补注实际载入分片：前端无从得知 sharkd 会话此刻
 			// load 的文件（轮换瞬间猜测必错），服务端权威告知。调用前后不一致说明
-			// tap 期间发生过换片，无法判定实际文件 —— 留空让前端提示而非给错分片
+			// tap 期间发生过换片，无法判定实际文件 —— 留空让前端提示而非给错分片。
+			// 并按帧序截断明细（maxTapDetails），丢弃总数经 truncated 披露。
 			var obj map[string]json.RawMessage
 			if json.Unmarshal(res, &obj) == nil {
 				loaded := before
@@ -162,6 +168,12 @@ func (s *Server) handleStreamRPC(method string) http.HandlerFunc {
 				}
 				shard, _ := json.Marshal(loaded)
 				obj["shard"] = shard
+				truncated, _ := json.Marshal(0)
+				if capped, dropped := capTapDetails(obj["taps"]); capped != nil {
+					obj["taps"] = capped
+					truncated, _ = json.Marshal(dropped)
+				}
+				obj["truncated"] = truncated
 				if b, merr := json.Marshal(obj); merr == nil {
 					res = b
 				} // 解析/重编码失败原样透传，不因附加键报错
@@ -170,4 +182,36 @@ func (s *Server) handleStreamRPC(method string) http.HandlerFunc {
 		sess.Touch()
 		writeJSON(w, json.RawMessage(res))
 	}
+}
+
+// capTapDetails 截断 taps 各明细数组：跨 tap 共享 maxTapDetails 预算，按帧序
+// 保留前 N 条，返回截断后的 taps 与丢弃总条数。taps 缺失/形态不符返回
+// (nil, 0)（调用方原样保留，不因截断逻辑报错）。
+func capTapDetails(raw json.RawMessage) (json.RawMessage, int) {
+	var taps []struct {
+		Tap     string            `json:"tap"`
+		Type    string            `json:"type"`
+		Details []json.RawMessage `json:"details"`
+	}
+	if json.Unmarshal(raw, &taps) != nil {
+		return nil, 0
+	}
+	dropped, budget := 0, maxTapDetails
+	for i := range taps {
+		if n := len(taps[i].Details); n <= budget {
+			budget -= n
+			continue
+		}
+		dropped += len(taps[i].Details) - budget
+		taps[i].Details = taps[i].Details[:budget]
+		budget = 0
+	}
+	if dropped == 0 {
+		return raw, 0
+	}
+	b, err := json.Marshal(taps)
+	if err != nil {
+		return nil, 0
+	}
+	return b, dropped
 }

@@ -1,6 +1,6 @@
 // stream_fix_test.go - 修复回归：/api/frame 一律走分片缓存实例（分流竞态）、
 // /api/tap 响应补注实际载入分片、Manager.Close 后 subscribe 503、0 字节分片
-// download 200。
+// download 200、tap 明细截断（maxTapDetails + truncated）。
 package server
 
 import (
@@ -108,4 +108,33 @@ func TestSubscribeColdFlag(t *testing.T) {
 
 	_, body = postJSON(t, ts, "/api/subscribe", `{"handle":"cold-1"}`)
 	require.Equal(t, false, body["cold"], "复用会话不应为 cold")
+}
+
+// TestTapDetailsCapped 锁定 tap 明细截断：单次响应明细按帧序最多
+// maxTapDetails 条（跨 tap 共享预算），丢弃总数经顶层 truncated 键披露；
+// 未截断时 truncated 为 0 且明细原样保留。
+func TestTapDetailsCapped(t *testing.T) {
+	t.Run("超限截断为前5000条并报truncated", func(t *testing.T) {
+		_, ts, _, sock := newServer(t, nil)
+		sock.tapDetails = 6000
+		subscribe(t, ts, "st-tap-cap")
+		code, body := postJSON(t, ts, "/api/tap", `{"handle":"st-tap-cap","tap0":"expert"}`)
+		require.Equal(t, http.StatusOK, code)
+		require.Equal(t, float64(1000), body["truncated"], "丢弃 6000-5000=1000 条")
+		taps := body["taps"].([]any)
+		require.Len(t, taps, 1)
+		require.Len(t, taps[0].(map[string]any)["details"], maxTapDetails)
+		require.Contains(t, body, "shard") // 既有 shard 补注保留
+	})
+
+	t.Run("未截断truncated为0且明细全保留", func(t *testing.T) {
+		_, ts, _, sock := newServer(t, nil)
+		sock.tapDetails = 2
+		subscribe(t, ts, "st-tap-small")
+		code, body := postJSON(t, ts, "/api/tap", `{"handle":"st-tap-small","tap0":"expert"}`)
+		require.Equal(t, http.StatusOK, code)
+		require.Equal(t, float64(0), body["truncated"])
+		taps := body["taps"].([]any)
+		require.Len(t, taps[0].(map[string]any)["details"], 2)
+	})
 }

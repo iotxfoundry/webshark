@@ -30,10 +30,11 @@ import (
 // frame 回单帧详情；check 含 "bad" 即语法错；complete 回固定候选；load 次数
 // 可查（LRU 断言）。
 type memSharkd struct {
-	ln     net.Listener
-	mu     sync.Mutex
-	loaded string
-	loads  map[string]int // 分片 basename → load 次数
+	ln         net.Listener
+	mu         sync.Mutex
+	loaded     string
+	loads      map[string]int // 分片 basename → load 次数
+	tapDetails int            // 测试用：tap 响应生成的专家明细条数（0=空列表，默认不变）
 }
 
 func startFakeSharkd(t *testing.T) *memSharkd {
@@ -152,6 +153,16 @@ func (m *memSharkd) dispatch(req fakeReq, p fakeParams, snap *string) []byte {
 	case "follow":
 		return resp(`{"follow":"...text...","err":0}`)
 	case "tap":
+		if m.tapDetails > 0 { // 测试用：按 tapDetails 生成专家明细
+			details := make([]map[string]int, m.tapDetails)
+			for i := range details {
+				details[i] = map[string]int{"frame": i}
+			}
+			b, _ := json.Marshal(map[string]any{
+				"taps": []map[string]any{{"tap": "expert", "type": "expert", "details": details}},
+			})
+			return resp(string(b))
+		}
 		return resp(`{"tap":[],"err":0}`)
 	}
 	return respErr(-32601, "no such method")

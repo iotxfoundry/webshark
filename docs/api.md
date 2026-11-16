@@ -73,10 +73,12 @@ sharkd 可达性 + 环窗（最近 `-ring` 片，默认 16）分片清单（`mti
 `{"handle": "...", "tap0": "expert"}` → 透传 sharkd `tap` 的 `result`，并在同级补注 `"shard"`：tap 实际执行时实时实例载入的分片名。参数键是 sharkd 的 `tap0`（`tap` 会被拒 `-32600`）。
 
 ```json
-{"shard": "net_00001_....pcapng", "taps": [{"tap": "expert", "type": "expert", "details": []}]}
+{"shard": "net_00001_....pcapng", "truncated": 0, "taps": [{"tap": "expert", "type": "expert", "details": []}]}
 ```
 
 `shard` 为空串表示 tap 时未载入分片，或调用期间发生过换片（服务端无法判定实际文件，宁可留空也不给错分片）。前端据此定位专家条目的帧。
+
+明细按帧序最多保留 5000 条（跨 tap 共享预算）；被丢弃的总条数在同级 `"truncated"` 披露（0 = 未截断）。界面上万条明细无法人工阅读，超出部分由 Wireshark 桌面端查看。
 
 ### GET|POST /api/check
 
