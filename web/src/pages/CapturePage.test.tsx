@@ -56,6 +56,8 @@ describe("CapturePage", () => {
   /** frame 挂起门(换帧常挂用例: 置 Promise 延缓应答, 释放后继续) */
   let frameHold: Promise<void> | null = null;
   let releaseFrame: () => void;
+  /** tap expert HTTP 端点应答(专家面板用例) */
+  let tapReply: unknown;
   beforeEach(() => {
     vi.useFakeTimers();
     origWS = window.WebSocket;
@@ -64,6 +66,7 @@ describe("CapturePage", () => {
     mockedDownload.mockReset();
     frameReply = { status: 200, body: { tree: [{ l: "Ethernet II" }], bytes: "AAE=" } };
     frameHold = null;
+    tapReply = { taps: [] };
     setToken("tk-page");
     // fetch 路由: subscribe(建流)/frame(详情)/check/complete 放行; 其余 URL(含旧路径)throw 暴露回归
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
@@ -76,6 +79,9 @@ describe("CapturePage", () => {
       }
       if (url.includes("/api/complete")) {
         return { ok: true, status: 200, json: async () => ({ field: [], pref: [] }) } as Response;
+      }
+      if (url.includes("/api/tap")) {
+        return { ok: true, status: 200, json: async () => tapReply } as Response;
       }
       if (url.includes("/api/frame")) {
         if (frameHold !== null) await frameHold;
@@ -334,6 +340,79 @@ describe("CapturePage", () => {
     act(() => { ws.push({ type: "rows", mode: "live", shard: "a.pcapng", rows: [wire(1), wire(2)] }); });
     expect(screen.queryByText(/正在等待实时数据流/)).not.toBeInTheDocument();
     expect(screen.getByText("info 2")).toBeInTheDocument();
+  });
+
+  it("详情串帧防护: 先点慢帧 A 后点快帧 B, A 的迟到应答不得覆盖 B 的详情", async () => {
+    // 两次 frame 请求按调用顺序入列, 应答体手动 resolve(模拟 A=冷分片慢 / B=缓存命中快)
+    const resolvers: Array<(d: unknown) => void> = [];
+    (fetch as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/frame")) {
+        const body = await new Promise<unknown>((r) => { resolvers.push(r); });
+        return { ok: true, status: 200, json: async () => body } as Response;
+      }
+      // 其余端点: subscribe 放行建流, check/complete/tap 空应答
+      if (url.includes("/api/subscribe")) {
+        return { ok: true, status: 200, json: async () => ({ ok: true, handle: "h", paused: false, filter: "", shard: "a.pcapng" }) } as Response;
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response;
+    });
+    const ws = await mountOpen([wire(1), wire(2)]);
+
+    // 点 A(帧 1) 请求挂起 → 点 B(帧 2) 请求挂起
+    fireEvent.click(screen.getByText("info 1"));
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.click(screen.getByText("info 2"));
+    await act(async () => { await Promise.resolve(); });
+    expect(resolvers).toHaveLength(2);
+
+    // 先 resolve B(快) 再 resolve A(慢): 修复前 A 迟到覆盖 B
+    resolvers[1]({ tree: [{ l: "IPv4 Header" }], bytes: "AgM=" });
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText("IPv4 Header")).toBeInTheDocument(); // B 先渲染
+
+    resolvers[0]({ tree: [{ l: "Ethernet II" }], bytes: "AAE=" });
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+    await act(async () => { await Promise.resolve(); });
+    // 最终详情必须是 B(后点帧): A 的迟到应答被丢弃
+    expect(screen.getByText("IPv4 Header")).toBeInTheDocument();
+    expect(screen.queryByText("Ethernet II")).not.toBeInTheDocument();
+    expect(rpcRequests(ws)).toEqual([]);
+  });
+
+  it("专家面板分片捕获: tap 打开时 shard=A, 轮换后 shard=B, 点击帧按捕获值 A 查询", async () => {
+    // 帧 9 不在 rows 内 → 点击走合成行路径, 查询 shard 必须取捕获值而非点击时的 shard 状态
+    const ws = await mountOpen([wire(1)], "a.pcapng");
+    // tap 打开时刻 shard=A; 之后服务端轮换(rotated) → shard 状态变为 B
+    tapReply = { taps: [{ tap: "expert", type: "expert", details: [{ f: 9, s: "Error", g: "Sequence", m: "ack", p: "TCP" }] }] };
+    fireEvent.click(screen.getByRole("button", { name: "专家信息" }));
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText("ack")).toBeInTheDocument(); // 面板数据就绪
+    act(() => { ws.push({ type: "rotated", shard: "b.pcapng" }); });
+
+    // 点击专家条目: frame 查询必须用捕获的 shard=A(tap 数据属于打开时刻的分片)
+    fireEvent.click(screen.getByText("ack"));
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+    const calls = frameCalls();
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    const q = new URL(calls[calls.length - 1], "http://localhost").searchParams;
+    expect(q.get("shard")).toBe("a.pcapng");
+    expect(q.get("num")).toBe("9");
+  });
+
+  it("专家面板降级: 实例未就绪(shard 空)点击条目不发 frame 查询, 透出提示", async () => {
+    await mountOpen([], ""); // 无 rows 推送 → shard 保持空串
+    tapReply = { taps: [{ tap: "expert", type: "expert", details: [{ f: 1, s: "Error", g: "Sequence", m: "ack", p: "TCP" }] }] };
+    fireEvent.click(screen.getByRole("button", { name: "专家信息" }));
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText("ack")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("ack"));
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+    expect(frameCalls()).toHaveLength(0); // 空捕获不查询
+    expect(screen.getByText(/无法定位帧/)).toBeInTheDocument();
   });
 
   it("导出 = spool 全部合并单一 pcapng(服务端拼接), 走 /api/download", async () => {

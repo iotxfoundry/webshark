@@ -108,20 +108,25 @@ export default function CapturePage() {
   // 行选择: frame 详情(树+hex), 查询键 = 行内隐藏复合键 ref(分片名+帧号, HTTP 按复合键路由).
   // 换帧保留旧详情渲染(降透明 + 面板头「加载帧详情…」标记, 旧内容「带标记的可见」而非占位
   // 替换), 新详情到达原地替换; 失败清 detail(空态 + 错误横幅透出服务端消息, 历史 404 =
-  // 「分片不在实时实例视图」诚实呈现), 旧帧数据不在无标记下冒充新帧
+  // 「分片不在实时实例视图」诚实呈现), 旧帧数据不在无标记下冒充新帧.
+  // 串帧防护: 冷分片请求慢/缓存命中快, 迟到的旧应答不得覆盖新帧——序号不匹配即丢弃.
+  const detailSeq = useRef(0);
   const onRowSelect = useCallback(async (r: CaptureViewRow) => {
+    const seq = ++detailSeq.current;
     setSelRow(r);
     setSelNode(undefined);
     setFrameLoading(true);
     try {
       const d = await fetchFrame(r.ref);
+      if (seq !== detailSeq.current) return;
       setDetail(d);
       setFrameErr("");
     } catch (e) {
+      if (seq !== detailSeq.current) return;
       setDetail(null);
       setFrameErr(e instanceof Error ? `帧 ${r.no} 详情失败: ${e.message}` : String(e));
     } finally {
-      setFrameLoading(false);
+      if (seq === detailSeq.current) setFrameLoading(false);
     }
   }, [fetchFrame]);
 
@@ -130,15 +135,24 @@ export default function CapturePage() {
     setFilterInput((prev) => (prev.trim() === "" ? f : `${prev.trim()} && ${f}`));
   }, []);
 
-  // 专家信息开关(抽屉覆层)
+  // 专家信息开关(抽屉覆层). expertShard = 打开面板时刻的分片快照: tap 结果属于请求时刻
+  // 载入的分片, 必须一并捕获, 不能读点击时的 shard 状态(聚合含多片时按帧号命中歧义,
+  // 打开后轮换更会让点击落错片)
   const [expertOpen, setExpertOpen] = useState(false);
+  const [expertShard, setExpertShard] = useState("");
 
-  // 专家信息行点击 → 选中该帧并拉详情. 最小实现: 不强求包列表滚动定位; 命中已持有行(按
-  // ref.num 匹配)则复用行选择获得列表高亮, 否则以帧号合成行仅拉详情(显示 No 以原始帧号兜底)
+  // 专家信息行点击 → 选中该帧并拉详情. 最小实现: 不强求包列表滚动定位; 命中已持有行
+  // (按捕获分片+帧号匹配)则复用行选择获得列表高亮, 否则以捕获分片+帧号合成行仅拉详情
+  // (显示 No 以原始帧号兜底); 捕获为空(实时实例尚未就绪)不查询, 透出提示
   const onExpertFrame = useCallback((n: number) => {
-    const r = rows.find((x) => x.ref.num === n) ?? { c: [], num: n, no: n, ref: { shard, num: n } };
+    if (expertShard === "") {
+      setFrameErr("实时实例尚未就绪，无法定位帧");
+      return;
+    }
+    const r = rows.find((x) => x.ref.shard === expertShard && x.ref.num === n)
+      ?? { c: [], num: n, no: n, ref: { shard: expertShard, num: n } };
     void onRowSelect(r);
-  }, [rows, shard, onRowSelect]);
+  }, [expertShard, rows, onRowSelect]);
 
   // 分割拖动: 上下(topH%) 与 左右(hexW px), pointer capture 复用
   const onVDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -160,7 +174,6 @@ export default function CapturePage() {
   const parseWindow = conn === "open" && rows.length === 0;
   // 空态三态文案: 暂停(服务端停推) / 筛选中(等匹配报文) / 默认(等实时流)
   const waitLabel = paused ? "抓包已暂停" : filter !== "" ? "等待匹配报文…" : "正在等待实时数据流…";
-
   return (
     <div className={styles.root} ref={rootRef}>
       {conn === "closed" && (
@@ -190,7 +203,8 @@ export default function CapturePage() {
         </Badge>
         {paused && <Badge appearance="tint" color="warning">已暂停</Badge>}
         <div style={{ flex: 1 }} />
-        <Button className={styles.btn} icon={<Info16Regular />} onClick={() => setExpertOpen(true)}>
+        <Button className={styles.btn} icon={<Info16Regular />}
+          onClick={() => { setExpertShard(shard); setExpertOpen(true); }}>
           专家信息
         </Button>
         {/* 暂停/恢复抓包: WS 上行 _ctl 流控制(冻结推送; 落盘 spool 不受影响) */}

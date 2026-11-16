@@ -70,7 +70,10 @@ export async function completeCaptureFilter(prefix: string): Promise<SharkdCompl
     "/api/complete", { prefix });
   const norm = (items?: SharkdCompletion[]): SharkdCompletion[] =>
     (items ?? []).map((it) => ({ ...it, d: it.d ?? it.n ?? "" }));
-  return [...norm(r?.field), ...norm(r?.pref)];
+  // field 与 pref 对同一前缀可能返回同名项(实测 prefix=icmp 两分支均含 icmp): 按 f 去重, 保留首次出现
+  const merged = [...norm(r?.field), ...norm(r?.pref)];
+  const seen = new Set<string>();
+  return merged.filter((it) => !seen.has(it.f) && seen.add(it.f));
 }
 
 /** POST /api/follow {handle, follow, filter}: 流跟随重组; 空流字段缺省归一补齐 */
