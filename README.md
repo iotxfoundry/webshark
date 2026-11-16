@@ -118,7 +118,7 @@ srv, err := webshark.New(webshark.Config{
 - **单分片视图**：sharkd 单会话同一时刻只 load 一个文件，同一视图只显示一个分片；跨分片筛选不支持（走合并导出 + 桌面 Wireshark）。
 - **冷启动不回放环窗历史**：实时流锚定最新分片，历史阅读走筛选模式或导出。
 - **Conversations/Endpoints 不提供**：依赖 sharkd build 是否注册 stats_tree 塔，本项目未使用。
-- **sharkd 为解析事实源**：字段语义、dfilter 语法、补全行为均随 Wireshark 版本而定（实测基线 4.6.9）。
+- **sharkd 为解析事实源**：字段语义、dfilter 语法、补全行为均随 Wireshark 版本而定（当前按 4.6.x 实现）。
 
 ## 验证链路
 

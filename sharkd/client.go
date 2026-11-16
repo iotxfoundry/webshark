@@ -3,8 +3,30 @@
 // sharkd 是 Wireshark 自带的协议解析守护进程，经 Unix socket 提供行式 JSON-RPC
 // 接口：加载 pcapng 文件、按游标取帧行、取单帧协议树与原始字节、校验与补全
 // display filter、流跟随、专家信息与统计等。本包负责连接管理（懒拨号、断线
-// 重拨、单会话串行请求）、超时与 envelope 错误映射；方法语义与字段以 sharkd
-// 版本为准（实测基线 4.6.9）。
+// 重拨、单会话串行请求）、超时与 envelope 错误映射。
+//
+// 方法集覆盖 sharkd 的全部 RPC 方法（19 个），参数名与响应字段保持协议原文，
+// 动态键由参数结构体展开：
+//
+//	Analyse      分析整份文件的协议清单
+//	Bye          结束会话
+//	Check        校验 display filter / 字段
+//	Complete     display filter / 偏好项补全
+//	Download     下载导出对象（token）
+//	DumpConf     导出偏好项
+//	Field        查询单个字段描述
+//	Fields       查询全部字段描述
+//	Follow       流跟随
+//	Frame        单帧详情（协议树/列/字节）
+//	Frames       帧列表原始行
+//	Info         sharkd 能力清单
+//	Intervals    按时间桶的流量分布
+//	IOGraph      时序图数据
+//	Load         加载抓包文件
+//	SetComment   追加帧注释
+//	SetConf      设置偏好项
+//	Status       已加载文件概览
+//	Tap          tap 采集（最多 16 路）
 //
 // 稳定性：本包尚未打版本 tag，导出名字与类型可能随实测与 sharkd 版本调整。
 //
@@ -13,10 +35,10 @@
 //	c := sharkd.NewClient("/run/webshark/sharkd.sock")
 //	defer c.Close()
 //
-//	if _, err := c.Call(ctx, "load", map[string]string{"file": "/var/lib/webshark/net.pcapng"}); err != nil {
+//	if _, err := c.Load(ctx, sharkd.LoadParams{File: "/var/lib/webshark/net.pcapng"}); err != nil {
 //		log.Fatal(err)
 //	}
-//	res, err := c.Call(ctx, "frames", map[string]any{"limit": 100})
+//	rows, err := c.Frames(ctx, sharkd.FramesParams{Limit: 100})
 //
 // 并发：一个 Client 对应一条 sharkd 会话，内部互斥串行（sharkd 协议是一问一答
 // 的行式协议，并发请求会串话）。需要并发就各建一个 Client（sharkd 每连接一个
