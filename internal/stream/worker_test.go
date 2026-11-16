@@ -574,13 +574,15 @@ func TestAttachTakeover(t *testing.T) {
 	}, 3*time.Second, 50*time.Millisecond)
 }
 
-// TestStreamCap 锁定流数上限：超过 maxStreams 的建流返回 ErrStreamLimit。
+// TestStreamCap 锁定流数上限：全部会话已连接（真占用）时，超过 maxStreams 的
+// 建流返回 ErrStreamLimit（未连接的停放会话可被淘汰，见 TestStreamCapEvictsDetached）。
 func TestStreamCap(t *testing.T) {
 	mgr := newManager(t, filepath.Join(t.TempDir(), "absent.sock"), t.TempDir())
 	for i := range maxStreams {
 		s, err := mgr.GetOrCreate(fmt.Sprintf("cap-%d", i))
 		require.NoError(t, err)
 		require.NotNil(t, s)
+		s.Attach(&websocket.Conn{}) // 零值指针仅作 ws != nil 判据（不读写）
 	}
 	_, err := mgr.GetOrCreate("over")
 	require.ErrorIs(t, err, ErrStreamLimit)

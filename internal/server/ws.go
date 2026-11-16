@@ -5,6 +5,7 @@ package server
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -13,6 +14,12 @@ import (
 
 // maxCtlMsg WS 上行单条消息上限（仅 _ctl 流控制，量级极小）。
 const maxCtlMsg = 32 << 10
+
+// pongWait/pingPeriod 读超时与 ping 周期（测试可覆盖，生产不得改小）。
+var (
+	pongWait   = 90 * time.Second
+	pingPeriod = 30 * time.Second
+)
 
 // handleWS GET /api/ws?handle=<handle>。
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -34,10 +41,38 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if old := sess.Attach(ws); old != nil {
 		_ = old.Close() // 同 handle 二次接入：接管流，旧连接关闭
 	}
-	sess.Enqueue(stream.HelloFrame("live"))
 	ws.SetReadLimit(maxCtlMsg)
+	// 死连接回收：读超时 + pong 续期（浏览器自动回 pong），超时读循环退出 →
+	// Detach → 宽限回收。包级参数仅此处读一次入快照（协程用快照，测试覆盖包级
+	// 变量时不与尚存协程竞态）。
+	pw, pp := pongWait, pingPeriod
+	if err := ws.SetReadDeadline(time.Now().Add(pw)); err != nil {
+		sess.Detach(ws) // 已 Attach：失败必须解绑，否则会话带着死连接永不回收
+		_ = ws.Close()
+		return
+	}
+	ws.SetPongHandler(func(string) error { return ws.SetReadDeadline(time.Now().Add(pw)) })
 
-	go func() { // 单写 goroutine：出队逐帧下发（被顶替/写失败即退出，读循环随之收尾）
+	done := make(chan struct{})
+	defer close(done)
+	go func() { // ping 保活：WriteControl 与写协程的 WriteMessage 并发安全（gorilla）
+		t := time.NewTicker(pp)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				if err := ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(pw)); err != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	go func() { // 单写 goroutine：出队逐帧下发（被顶替/写失败即退出，读循环随之收尾）。
+		// 先于 Enqueue 启动：队列已满时 Enqueue 背压阻塞，唯一消费者必须先就位
+		// （先入队后启动即重连死锁——满队 hello 永远发不出去且 janitor 不回收）。
 		for {
 			msg, ok := sess.PopFor(ws)
 			if !ok {
@@ -48,6 +83,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
+
+	sess.Enqueue(stream.HelloFrame("live"))
 
 	for { // 读循环：_ctl 流控制（其余上行忽略）
 		_, data, err := ws.ReadMessage()

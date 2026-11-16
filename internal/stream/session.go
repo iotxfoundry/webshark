@@ -104,6 +104,17 @@ func (s *Session) Touch() {
 
 func (s *Session) touchLocked() { s.expires = time.Now().Add(streamGrace) }
 
+// staleAt 断线停放会话的到期时刻（janitor 据此销毁；容量淘汰同判据）。ok=false
+// 表示有活跃连接不可淘汰。
+func (s *Session) staleAt() (time.Time, bool) {
+	s.wsMu.Lock()
+	defer s.wsMu.Unlock()
+	if s.ws != nil {
+		return time.Time{}, false
+	}
+	return s.expires, true
+}
+
 // expired 报告会话是否可销毁（无连接且宽限已过）。
 func (s *Session) expired(now time.Time) bool {
 	s.wsMu.Lock()

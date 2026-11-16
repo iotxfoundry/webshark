@@ -352,8 +352,11 @@ func TestSubscribe(t *testing.T) {
 
 	t.Run("流上限429", func(t *testing.T) {
 		_, ts, _, _ := newServer(t, nil)
-		for i := 0; i < 16; i++ {
+		for i := 0; i < 16; i++ { // 逐个接入 WS：全部已连接才是真占用（未连接停放会话可被淘汰）
 			subscribe(t, ts, fmt.Sprintf("st-%d", i))
+			ws, err := dialWS(t, ts, nil, fmt.Sprintf("handle=st-%d", i))
+			require.NoError(t, err)
+			readFrame(t, ws) // hello
 		}
 		code, _ := postJSON(t, ts, "/api/subscribe", `{"handle":"st-overflow"}`)
 		require.Equal(t, http.StatusTooManyRequests, code)
@@ -563,8 +566,12 @@ func TestWS(t *testing.T) {
 
 	t.Run("建流上限发error帧后关闭", func(t *testing.T) {
 		_, ts, _, _ := newServer(t, nil)
-		for i := 0; i < 16; i++ {
-			subscribe(t, ts, fmt.Sprintf("st-%d", i))
+		for i := 0; i < 16; i++ { // 逐个接入 WS：全部已连接才是真占用（未连接停放会话可被淘汰）
+			h := fmt.Sprintf("st-%d", i)
+			subscribe(t, ts, h)
+			ws, err := dialWS(t, ts, nil, "handle="+h)
+			require.NoError(t, err)
+			readFrame(t, ws) // hello
 		}
 		ws, err := dialWS(t, ts, nil, "handle=st-overflow")
 		require.NoError(t, err)

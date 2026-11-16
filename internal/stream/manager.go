@@ -82,7 +82,24 @@ func (m *Manager) GetOrCreate(handle string) (*Session, error) {
 		return s, nil
 	}
 	if len(m.sessions) >= maxStreams {
-		return nil, ErrStreamLimit
+		// 容量淘汰：断线会话只是停放游标（宽限内），淘汰最旧的一个腾位；重连
+		// 按新流重建（前端按 reset 对齐）。全部已连接才是真上限。
+		var oldestH string
+		var oldest time.Time
+		for h, s := range m.sessions {
+			at, ok := s.staleAt()
+			if !ok {
+				continue
+			}
+			if oldestH == "" || at.Before(oldest) {
+				oldestH, oldest = h, at
+			}
+		}
+		if oldestH == "" {
+			return nil, ErrStreamLimit
+		}
+		m.sessions[oldestH].shutdown()
+		delete(m.sessions, oldestH)
 	}
 	s := newSession(handle, m)
 	m.sessions[handle] = s
