@@ -51,6 +51,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -115,8 +116,9 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 	defer stop()
 
 	deadline := time.Now().Add(DefaultTimeout)
+	fromCtx := false
 	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
-		deadline = dl
+		deadline, fromCtx = dl, true // 截止时刻由 ctx 决定：超时即视为 ctx 到期
 	}
 
 	c.nextID++
@@ -135,6 +137,14 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 	if rerr != nil {
 		if cerr := ctx.Err(); cerr != nil {
 			return nil, cerr
+		}
+		// 读写在 ctx 截止时刻超时：ctx 的取消通知可能尚未送达，这里直接归一为
+		// DeadlineExceeded，调用方不必区分"传输超时"与"调用方超时"
+		if fromCtx {
+			var ne net.Error
+			if errors.As(rerr, &ne) && ne.Timeout() {
+				return nil, context.DeadlineExceeded
+			}
 		}
 	}
 	return res, rerr
