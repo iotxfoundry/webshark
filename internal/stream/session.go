@@ -7,6 +7,7 @@ package stream
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"time"
 
@@ -20,6 +21,9 @@ const maxOutQueue = 256
 
 // resetFrame 全量对齐信号帧（出窗对齐/筛选清视图共用）。
 var resetFrame = ResetFrame("realign")
+
+// errSessionClosed 会话已关闭后的 Call 拒绝。
+var errSessionClosed = errors.New("实时流已关闭")
 
 // Session 一条实时流（单生产者 worker + 单消费者 WS writer）。
 type Session struct {
@@ -157,6 +161,9 @@ func (s *Session) Shard() string {
 func (s *Session) Call(method string, params any) (json.RawMessage, error) {
 	s.sharkMu.Lock()
 	defer s.sharkMu.Unlock()
+	if s.ctx.Err() != nil {
+		return nil, errSessionClosed
+	}
 	if s.shark == nil {
 		s.shark = sharkd.NewClient(s.m.cfg.Sock)
 	}
