@@ -1,8 +1,7 @@
 GO ?= go
 BIN := bin
 
-# go.mod 的 ignore 指令已排除 web/ui/node_modules（其内随包携带第三方 Go 文件），
-# ./... 在装/不装 node 的工作区都安全
+# go.mod 的 ignore 指令已排除整个 web/ui（前端工程），./... 在装/不装 node 的工作区都安全
 PKGS := ./...
 
 # 打包时归一化 mtime：内容不变则 zip 字节不变，避免无意义二进制差异
