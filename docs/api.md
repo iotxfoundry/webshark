@@ -25,7 +25,7 @@
 
 ### GET /api/status
 
-sharkd 可达性 + spool 分片清单（`mtime` 降序，同 `mtime` 按名字降序）。
+sharkd 可达性 + 环窗（最近 `-ring` 片，默认 16）分片清单（`mtime` 降序，同 `mtime` 按名字降序）。
 
 ```json
 {
@@ -38,7 +38,7 @@ sharkd 可达性 + spool 分片清单（`mtime` 降序，同 `mtime` 按名字�
 
 ### GET /api/download
 
-把 spool 全部分片按 `mtime` 升序逐文件流式拼接为单一 pcapng 响应（pcapng 允许多 SHB/IDB 段共存，纯字节拼接即合法文件）。不设 `Content-Length`（滚动分片随时增删），走 chunked；单文件打开失败（轮换瞬间被删）跳过。
+把环窗（最近 `-ring` 片，默认 16）内的全部分片按 `mtime` 升序逐文件流式拼接为单一 pcapng 响应（pcapng 允许多 SHB/IDB 段共存，纯字节拼接即合法文件）。不设 `Content-Length`（滚动分片随时增删），走 chunked；单文件打开失败（轮换瞬间被删）跳过；无任何分片可读时 `503`。
 
 - 成功：`200`，`Content-Type: application/octet-stream`，`Content-Disposition: attachment; filename="webshark-YYYYMMDDhhmmss.pcapng"`
 - spool 无分片：`404`

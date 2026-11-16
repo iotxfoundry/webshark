@@ -13,7 +13,9 @@ import (
 // handleStatus GET /api/status。
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	connected := sharkd.Probe(s.cfg.SharkdSock, statusProbeTimeout)
-	body := map[string]any{"connected": connected, "files": spool.List(s.cfg.SpoolDir)}
+	body := map[string]any{"connected": connected,
+		// 与实时流同窗口：环外遗留分片（dumpcap 重启换代残留）不进计数。
+		"files": spool.Ring(s.cfg.SpoolDir, s.cfg.RingSize)}
 	if !connected {
 		body["reason"] = "sharkd socket 不可拨: " + s.cfg.SharkdSock
 	}
