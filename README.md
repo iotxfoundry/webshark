@@ -11,7 +11,7 @@ webshark 是 **Wireshark 的 Web 前端**（仅服务端）：不生产 pcapng�
 - **dfilter 筛选**：sharkd 语法校验与字段/协议补全；筛选模式自环窗起点逐片走查。
 - **专家信息、流跟随**：经 sharkd tap/follow 透传。
 - **合并导出**：环窗内全部分片按 mtime 升序拼接为单一 pcapng 下载（导入桌面 Wireshark 做跨分片分析）。
-- **可嵌入**：根包 `webshark` 提供 `Config`/`New`/`Handler`/`Close`，一行装配进已有 Go 服务；`sharkd` 子包是独立的 sharkd 客户端 SDK（`import "github.com/iotxfoundry/webshark/sharkd"`）。
+- **可嵌入**：根包 `webshark` 提供 `Config`/`New`/`Handler`/`Close`，一行装配进已有 Go 服务；`sharkd` 子包是独立的 sharkd 客户端 SDK（`import "github.com/iotxfoundry/webshark/sharkd"`），覆盖 sharkd 全部 19 个 RPC 方法，支持路径型（`/run/webshark/sharkd.sock`）与抽象型（`@name`）Unix socket。
 - **纯 Go、无 cgo**：Go 直接依赖仅 fsnotify 与 gorilla/websocket（testify 仅测试）。
 - **鉴权**：Bearer token / `?token=`（WebSocket 与下载直链），常量时间比较；token 录入页始终公开。
 

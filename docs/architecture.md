@@ -12,7 +12,7 @@ webshark 不生产 pcapng、不解析协议：分片由外部 dumpcap 滚动写�
 | `webshark.go`（根包） | 对外可嵌入 API：`Config`/`New`/`Handler`/`Close`，内聚 `internal/server` |
 | `internal/server` | `/api/*` 路由、token 鉴权中间件、SPA 静态站点、分片缓存实例、下载拼接 |
 | `internal/stream` | 实时推送流引擎：会话管理器 + 每流 worker + 筛选模式 + WS 线格式 |
-| `sharkd/` | 公开 sharkd 客户端 SDK：19 个 RPC 方法全覆盖，参数名与字段保持协议原文 |
+| `sharkd/` | 公开 sharkd 客户端 SDK：19 个 RPC 方法全覆盖，参数名与字段保持协议原文；连接支持路径型与抽象型 Unix socket（sharkd 的 TCP 形态在 Linux 构建中编译期禁用，不支持） |
 | `internal/spool` | 分片枚举（mtime 降序）与分片出现检测（fsnotify + stat 兜底） |
 | `web/` | 前端 SPA（React 18 + Fluent UI v9 + Vite 6），打包为单个 `dist.zip` 后 `//go:embed` 内嵌 |
 

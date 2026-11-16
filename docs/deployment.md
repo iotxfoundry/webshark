@@ -151,6 +151,7 @@ webshark 全部接口同源无前缀，可挂任意反代子路径，无需重�
 - **token 生成**：`openssl rand -hex 32`。写入 `/etc/webshark/token`：`WEBSHARK_TOKEN=<值>`，`chmod 600`、归属 `webshark:webshark`。
 - **安全阀**：监听非 loopback 且未配 token 时 webshark 拒绝启动。对外暴露的正确姿势是：webshark 只听 `127.0.0.1:8080`，TLS 与公网入口交给反代，token 经 `WEBSHARK_TOKEN` 注入。
 - **TLS**：sharkd 的 UDS 与 webshark 的 HTTP 都不要直接暴露公网（sharkd 官方同样如此建议）；公网侧只有反代的 443。
+- **传输形态**：webshark 仅支持 Unix socket 形态的 sharkd（路径型 `unix:<path>` 与抽象型 `unix:@<name>`，后者 `-sharkd` 直接传 `@<name>` 即可）。sharkd 的 `tcp:<ip>:<port>` 形态在 Linux 发行版构建中编译期禁用（协议无鉴权，官方视为不安全），本项目亦不支持；Windows 版 sharkd 仅提供 TCP 形态，而 webshark 不面向 Windows。
 
 ## 常见故障
 
