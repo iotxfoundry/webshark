@@ -1,6 +1,7 @@
-// embedMessaging.ts - iframe 嵌入「宿主注入令牌与主题」postMessage 协议(键名固定):
+// embedMessaging.ts - iframe 嵌入「宿主注入令牌与主题与筛选」postMessage 协议(键名固定):
 // 宿主 → iframe: {type:"webshark:set-token", token:string}(空串=清除)
 //               {type:"webshark:set-theme", theme:"dark"|"light"}
+//               {type:"webshark:set-filter", filter:string}(空串=清除筛选)
 // iframe → 宿主: {type:"webshark:ready"}(监听器就绪, 宿主此后才发 set-*; 也兼容宿主在
 //               iframe onload 后直接发) / {type:"webshark:unauthorized"}(401, 宿主应刷新
 //               令牌并重发 set-token)
@@ -17,6 +18,16 @@ interface HostMessage {
   type?: unknown;
   token?: unknown;
   theme?: unknown;
+  filter?: unknown;
+}
+
+/** set-filter 的页面侧执行者(CapturePage 挂载时注册; 空串=清除筛选) */
+type FilterHandler = (filter: string) => void;
+let filterHandler: FilterHandler | null = null;
+
+/** 注册筛选注入执行者(与 client.setUnauthorizedHandler 同模式); 传 null 注销 */
+export function setFilterHandler(h: FilterHandler | null): void {
+  filterHandler = h;
 }
 
 /** init 前到达的消息队列(封顶 32, 防异常场景无界增长) */
@@ -28,6 +39,8 @@ function apply(d: HostMessage): void {
     setToken(d.token);
   } else if (d.type === "webshark:set-theme" && (d.theme === "light" || d.theme === "dark")) {
     useThemeStore.getState().setTheme(d.theme);
+  } else if (d.type === "webshark:set-filter" && typeof d.filter === "string") {
+    filterHandler?.(d.filter);
   }
   // 其余类型/缺字段: 一律忽略(向前兼容)
 }

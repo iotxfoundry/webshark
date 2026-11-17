@@ -20,6 +20,8 @@ import {
 } from "@fluentui/react-icons";
 import { useCaptureStream } from "../hooks/useCaptureStream";
 import { useCaptureStatus } from "../hooks/useCaptureStatus";
+import { initialFilter, persistFilter, syncFilterUrl } from "../env";
+import { setFilterHandler } from "../lib/embedMessaging";
 import type { CaptureViewRow } from "../hooks/captureAggregator";
 import { downloadCaptureAll } from "../api/capture";
 import { getToken } from "../api/token";
@@ -105,7 +107,8 @@ export default function CapturePage({ embedded = false, onOpenToken }: { embedde
   const { theme, toggle } = useThemeStore();
   const { status } = useCaptureStatus();
   const fileCount = status?.files?.length ?? 0;
-  const [filterInput, setFilterInput] = useState("");  const [paused, setPausedUi] = useState(false);
+  const [filterInput, setFilterInput] = useState(initialFilter); // 初始: URL ?filter= > 上次筛选
+  const [paused, setPausedUi] = useState(false);
   // autoscroll = 纯前端显示开关(数据照常追加, 仅控制吸底), Wireshark 同名语义
   const [following, setFollowingUi] = useState(true);
   const [detail, setDetail] = useState<SharkdFrameDetail | null>(null);
@@ -137,12 +140,25 @@ export default function CapturePage({ embedded = false, onOpenToken }: { embedde
     return m !== null && f !== undefined ? { type: FOLLOW_TYPES[m[1]], filter: f } : null;
   }, [selNode]);
 
-  // filter 应用(Enter/清除): WS 上行 _ctl{op:"filter"} 进出筛选模式(空串退出); 清选中态
+  // filter 应用(Enter/清除/宿主注入/URL 还原): WS 上行 _ctl{op:"filter"} 进出筛选模式
+  // (空串退出); 清选中态; 同步 localStorage(重开网页保留)与地址栏(刷新/分享凭 URL 还原)
   const onApplyFilter = useCallback((f: string) => {
     setFilterInput(f);
     applyFilter(f);
+    persistFilter(f);
+    syncFilterUrl(f);
     setSelRow(null); setSelNode(undefined); setDetail(null);
   }, [applyFilter]);
+
+  // 初始还原 + 宿主注入(webshark:set-filter): 两者都汇入 onApplyFilter 单通道;
+  // applyFilter 未连接仅存态、连接后重断言, 故挂载即应用安全. 初始为空不发请求.
+  useEffect(() => {
+    const f0 = filterInput;
+    if (f0 !== "") onApplyFilter(f0);
+    setFilterHandler((f) => onApplyFilter(f));
+    return () => setFilterHandler(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- filterInput 仅取初始种子(经 useState 惰性初始化)
+  }, [onApplyFilter]);
 
   // 行选择: frame 详情(树+hex), 查询键 = 行内隐藏复合键 ref(分片名+帧号, HTTP 按复合键路由).
   // 换帧保留旧详情渲染(降透明 + 面板头「加载帧详情…」标记, 旧内容「带标记的可见」而非占位

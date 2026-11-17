@@ -1,7 +1,7 @@
 // embedMessaging.test.ts - 宿主注入协议: set-token/set-theme 派发 → store 变化; 未知类型/
 // 缺字段忽略; notifyReady/notifyUnauthorized 对 window.parent post(type 消息).
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { initEmbedMessaging, notifyReady, notifyUnauthorized } from "./embedMessaging";
+import { initEmbedMessaging, notifyReady, notifyUnauthorized, setFilterHandler } from "./embedMessaging";
 import { useThemeStore } from "../stores/theme";
 import { getToken } from "../api/token";
 
@@ -48,6 +48,22 @@ describe("宿主 → iframe", () => {
     expect(localStorage.getItem("webshark-theme")).toBeNull();
     dispatch({ type: "webshark:set-theme", theme: "dark" });
     expect(useThemeStore.getState().theme).toBe("dark");
+  });
+
+  it("set-filter → 已注册的页面执行者收到筛选串(含空串清除); 未注册时静默", () => {
+    const seen: string[] = [];
+    setFilterHandler((f) => seen.push(f));
+    initEmbedMessaging();
+    dispatch({ type: "webshark:set-filter", filter: "tcp.port == 80" });
+    expect(seen).toEqual(["tcp.port == 80"]);
+    dispatch({ type: "webshark:set-filter", filter: "" }); // 空串=清除
+    expect(seen).toEqual(["tcp.port == 80", ""]);
+    dispatch({ type: "webshark:set-filter" }); // 缺字段: 忽略
+    dispatch({ type: "webshark:set-filter", filter: 123 }); // 非串: 忽略
+    expect(seen).toHaveLength(2);
+    setFilterHandler(null); // 注销后再来消息: 静默不抛
+    dispatch({ type: "webshark:set-filter", filter: "udp" });
+    expect(seen).toHaveLength(2);
   });
 
   it("未知类型/缺字段/非对象载荷一律忽略(store 不变)", () => {

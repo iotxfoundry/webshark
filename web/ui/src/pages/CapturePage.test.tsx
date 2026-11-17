@@ -43,6 +43,8 @@ describe("CapturePage", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     restoreWS = installMockWebSocket();
+    localStorage.clear(); // 筛选持久化跨用例泄漏清理(重开保留特性会读上次筛选)
+    window.history.replaceState(null, "", "/"); // 同上: ?filter= 与地址栏残留
     mockedDownload.mockReset();
     frameReply = { status: 200, body: { tree: [{ l: "Ethernet II" }], bytes: "AAE=" } };
     frameHold = null;
