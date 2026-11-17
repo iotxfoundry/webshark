@@ -80,10 +80,12 @@ export function CaptureFilterBar({ value, onChange, onApply, check, complete, ac
   const state = checkState.state;
   const errMsg = checkState.msg;
 
-  // 防抖 complete: 输入停 300ms 补全(前缀含点或字母; 空 token 不补)
+  // 防抖 complete: 输入停 300ms 补全(前缀含点或字母; 空 token 不补)。
+  // 不以 check 结果为门槛: 补全的意义就是辅助输入到合法(如 `ip.` 校验必报
+  // 无效, 若拦截则候选永远弹不出, 与 Wireshark 行为相悖)
   useEffect(() => {
     const prefix = completionPrefix(value);
-    if (prefix.trim() === "" || state === "invalid") {
+    if (prefix.trim() === "") {
       const id = setTimeout(() => setCompletions([]), 0);
       return () => clearTimeout(id);
     }
@@ -96,7 +98,7 @@ export function CaptureFilterBar({ value, onChange, onApply, check, complete, ac
       } catch { setCompletions([]); }
     }, 300);
     return () => clearTimeout(t);
-  }, [value, state, complete]);
+  }, [value, complete]);
 
   return (
     <div className={styles.root}>

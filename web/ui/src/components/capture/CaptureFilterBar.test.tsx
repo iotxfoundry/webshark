@@ -95,6 +95,19 @@ describe("CaptureFilterBar", () => {
     expect(applied[applied.length - 1]).toContain("== 80");
   });
 
+  it("校验无效仍出补全: `ip.` 类非法前缀正是补全目标, 不以 check 结果为门槛(对齐 Wireshark)", async () => {
+    const check = vi.fn().mockRejectedValue(new Error('Filter invalid - "." was unexpected in this context.'));
+    const complete = vi.fn().mockResolvedValue([{ f: "ip.addr", d: "Source or Destination Address" }]);
+    render(<Harness check={check} complete={complete} />);
+    const input = screen.getByRole("textbox");
+    await userEvent.type(input, "ip.");
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    expect(screen.getByText("过滤器无效")).toBeInTheDocument(); // 错误横幅保留(透传 sharkd)
+    expect(complete).toHaveBeenCalledWith("ip.");               // 补全照常请求
+    expect(screen.getByRole("listbox")).toBeInTheDocument();    // 候选照常展示
+    expect(screen.getByText("ip.addr")).toBeInTheDocument();
+  });
+
   it("空 filter: 不发 check 也不发 complete", async () => {
     const check = vi.fn();
     const complete = vi.fn();
