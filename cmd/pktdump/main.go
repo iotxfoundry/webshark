@@ -77,7 +77,7 @@ func splitNames(s string) []string {
 }
 
 // source 采集源最小契约: serial.SerialSource 与 can.CANSource 均满足,
-// Start 兼作启动探测(环境不可用返回各自的 Err*Unavailable), 测试注入桩源.
+// Start 兼作启动探测(环境不可用返回 *capture.ErrSourceUnavailable), 测试注入桩源.
 type source interface {
 	Name() string
 	Start(ctx context.Context, push func(capture.Frame)) error
@@ -87,9 +87,8 @@ type source interface {
 // isUnavailable 源启动失败是否为环境不可用类(接口不存在/能力缺失/内核过旧等):
 // 此类失败降级跳过该源, 其余启动错误视为致命.
 func isUnavailable(err error) bool {
-	var se *serial.ErrSerialUnavailable
-	var ce *can.ErrCANUnavailable
-	return err != nil && (errors.As(err, &se) || errors.As(err, &ce))
+	var ue *capture.ErrSourceUnavailable
+	return err != nil && errors.As(err, &ue)
 }
 
 // frameSink 共享落盘汇聚点: 全部源并发推送, RollingWriter 非并发安全, 互斥锁
@@ -107,7 +106,7 @@ type frameSink struct {
 // push 采集源回调: 写一帧入滚动分片.
 func (s *frameSink) push(f capture.Frame) {
 	data := f.Data
-	if f.LinkType == pcapng.LinkTypeSocketCAN {
+	if f.LinkType == capture.LinkTypeSocketCAN {
 		data = pcapng.CanFrameBE(data)
 	}
 	s.mu.Lock()
@@ -213,7 +212,7 @@ func run() int {
 	// 不产帧, 接口块仅是分片元数据; 接口号=声明序, 帧与 IDB 恒一致.
 	var srcs []source
 	for _, p := range ports {
-		id, err := w.AddInterface(pcapng.LinkTypeUser0, p.tty)
+		id, err := w.AddInterface(capture.LinkTypeUser0, p.tty)
 		if err != nil {
 			log.Error("登记串口接口失败", "iface", p.tty, "err", err)
 			_ = w.Close()
@@ -222,7 +221,7 @@ func run() int {
 		srcs = append(srcs, serial.NewSerialSource([]string{p.tty}, p.baud, id, log))
 	}
 	for _, name := range ifaces {
-		id, err := w.AddInterface(pcapng.LinkTypeSocketCAN, name)
+		id, err := w.AddInterface(capture.LinkTypeSocketCAN, name)
 		if err != nil {
 			log.Error("登记 CAN 接口失败", "iface", name, "err", err)
 			_ = w.Close()

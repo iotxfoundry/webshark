@@ -25,10 +25,6 @@ import (
 	"github.com/iotxfoundry/webshark/internal/capture"
 )
 
-// LinkTypeCAN CAN 帧落 pcapng 的链路类型: LINKTYPE_CAN_SOCKETCAN(227), 与串口源
-// LinkType 147(USER0)同机制 —— 接口由 daemon 按帧携带的链路类型懒声明, 无需配置.
-const LinkTypeCAN = capture.LinkType(227)
-
 // SocketCAN 帧布局(内核 linux/can.h), 长度即帧型判据: CAN_RAW_FD_FRAMES 开启后
 // 同一 socket 上经典帧读出 16B(can_frame), FD 帧读出 72B(canfd_frame),
 // 帧内无独立类型位 —— 读循环按单帧 read 的返回长度区分.
@@ -42,14 +38,6 @@ const (
 	canIDEFF = 0x80000000 // EFF: 扩展帧(29 位 id), 否则标准帧(11 位)
 	canIDRTR = 0x40000000 // RTR: 远程请求帧(线上不携带数据字节)
 )
-
-// ErrCANUnavailable CAN 源能力探测失败(接口不存在/内核未编 CONFIG_CAN/无 CAP_NET_RAW 等),
-// 调用方应降级跳过该源而非中断 daemon.
-type ErrCANUnavailable struct {
-	Reason string
-}
-
-func (e *ErrCANUnavailable) Error() string { return "CAN 采集源不可用: " + e.Reason }
 
 // ParseCanFrame 解析 SocketCAN 原始帧(用户态纯函数): 经典 16B 与 FD 72B 两种布局,
 // 按输入长度区分(采集侧单帧 read 的返回长度即帧型). 字段表:
@@ -138,9 +126,7 @@ type CANSource struct {
 	wg      sync.WaitGroup // 读循环
 }
 
-var _ = capture.Frame{} // 编译期锚: 帧模型契约见 internal/capture(readLoop 推 capture.Frame)
-
-// NewCANSource 新建 CAN 源. 构造只记配置, 探测在 Start 做(失败返回 *ErrCANUnavailable).
+// NewCANSource 新建 CAN 源. 构造只记配置, 探测在 Start 做(失败返回 *capture.ErrSourceUnavailable).
 // ifaceID 为帧携带的采集接口号(引擎分配, 0 保留未知).
 func NewCANSource(iface string, ifaceID uint16) *CANSource {
 	return &CANSource{iface: iface, ifaceID: ifaceID, fd: -1}
@@ -149,11 +135,8 @@ func NewCANSource(iface string, ifaceID uint16) *CANSource {
 // Name 源标识.
 func (s *CANSource) Name() string { return "can:" + s.iface }
 
-// IfaceID 帧携带的采集接口号(测试/装配断言用).
-func (s *CANSource) IfaceID() uint16 { return s.ifaceID }
-
 // Start 实现采集源: ifindex 解析 → AF_CAN RAW socket → bind →(尽力)开 FD 帧
-// 接收 → 读循环. 任一准备步骤失败返回 *ErrCANUnavailable; FD 开关失败仅降级为纯经典帧
+// 接收 → 读循环. 任一准备步骤失败返回 *capture.ErrSourceUnavailable; FD 开关失败仅降级为纯经典帧
 // (老内核无此选项时内核会丢弃总线上的 FD 帧), 不致命.
 func (s *CANSource) Start(ctx context.Context, push func(capture.Frame)) error {
 	s.mu.Lock()
@@ -168,17 +151,17 @@ func (s *CANSource) Start(ctx context.Context, push func(capture.Frame)) error {
 	ifc, err := net.InterfaceByName(s.iface)
 	if err != nil {
 		s.mu.Unlock()
-		return &ErrCANUnavailable{Reason: fmt.Sprintf("接口 %s 不存在: %v", s.iface, err)}
+		return &capture.ErrSourceUnavailable{Kind: "CAN", Reason: fmt.Sprintf("接口 %s 不存在: %v", s.iface, err)}
 	}
 	fd, err := unix.Socket(unix.AF_CAN, unix.SOCK_RAW, unix.CAN_RAW)
 	if err != nil {
 		s.mu.Unlock()
-		return &ErrCANUnavailable{Reason: fmt.Sprintf("创建 AF_CAN RAW socket 失败(内核需编 CONFIG_CAN+CONFIG_CAN_RAW, 进程需 CAP_NET_RAW): %v", err)}
+		return &capture.ErrSourceUnavailable{Kind: "CAN", Reason: fmt.Sprintf("创建 AF_CAN RAW socket 失败(内核需编 CONFIG_CAN+CONFIG_CAN_RAW, 进程需 CAP_NET_RAW): %v", err)}
 	}
 	if err := unix.Bind(fd, &unix.SockaddrCAN{Ifindex: ifc.Index}); err != nil {
 		_ = unix.Close(fd)
 		s.mu.Unlock()
-		return &ErrCANUnavailable{Reason: fmt.Sprintf("bind %s 失败: %v", s.iface, err)}
+		return &capture.ErrSourceUnavailable{Kind: "CAN", Reason: fmt.Sprintf("bind %s 失败: %v", s.iface, err)}
 	}
 	// 读循环用短超时轮询(200ms)驱动退出检查, 免去阻塞 read 感知不到 ctx/Stop 的问题,
 	// 也免去并发 close fd 的复用竞窗.
@@ -197,7 +180,7 @@ func (s *CANSource) frameOf(fields map[string]string, data []byte) capture.Frame
 	fields["iface"] = s.iface
 	return capture.Frame{
 		IfaceID:  s.ifaceID,
-		LinkType: LinkTypeCAN,
+		LinkType: capture.LinkTypeSocketCAN,
 		TS:       time.Now(),
 		Data:     data,
 		Fields:   fields,

@@ -1,7 +1,7 @@
 // Package serial 串口采集源：eBPF 挂 tty 层抓任意进程的串口字节流（tty 排他，
 // 应用侧无法自行埋点），用户态按 Modbus RTU 3.5 字符静默定界切帧。
 //
-// 部署前提（不满足时 Start 返回 *ErrSerialUnavailable，调用方降级跳过该源）：
+// 部署前提（不满足时 Start 返回 *capture.ErrSourceUnavailable，调用方降级跳过该源）：
 //
 //   - 内核 ≥ 5.8（ringbuf map 支持）；
 //   - CONFIG_DEBUG_INFO_BTF（CO-RE 按 BTF 解析结构体字段）且未 lockdown BPF；
@@ -12,7 +12,6 @@ package serial
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -23,7 +22,6 @@ import (
 	"unsafe"
 
 	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/ringbuf"
 	"golang.org/x/sys/unix"
 
@@ -64,23 +62,11 @@ func structsUnmarshal(b []byte, ev *bpfEventT) error {
 	return nil
 }
 
-// LinkTypeSerial 串口帧落 pcapng 的链路类型：LINKTYPE_USER0(147)，Wireshark 侧
-// 配 DLT_USER0→mbrtu 即可深度解析（不存在专用的 Modbus RTU linktype）。
-const LinkTypeSerial = capture.LinkType(147)
-
 // BPF 事件方向值，与 struct event_t.dir 对应。
 const (
 	dirTX = 0 // n_tty_write：主机发
 	dirRX = 1 // n_tty_receive_buf_common：主机收
 )
-
-// ErrSerialUnavailable 串口源能力探测失败（无 CAP_BPF/内核过低/BTF 缺失/挂点失败等），
-// 调用方应降级跳过该源而非中断整体采集。
-type ErrSerialUnavailable struct {
-	Reason string
-}
-
-func (e *ErrSerialUnavailable) Error() string { return "串口采集源不可用: " + e.Reason }
 
 // SerialSource 串口 eBPF 采集源：一实例服务一组 tty 名（tty->name，如 ttyUSB0），
 // 每口 TX/RX 各一个 Framer 定界，切出的 RTU 帧转 capture.Frame 推给调用方。
@@ -96,7 +82,6 @@ type SerialSource struct {
 	rbs   []*ringbuf.Reader
 	fr    map[string]*framerPair
 	wg    sync.WaitGroup
-	drops uint64
 	tsb   tsBase // 帧时刻换算基准（Start 采样）
 }
 
@@ -107,7 +92,7 @@ type framerPair struct {
 }
 
 // NewSerialSource 新建串口源。构造只记配置，能力探测在 Start 做（失败返回
-// *ErrSerialUnavailable 并记一条 WARN）。ifaceID 为帧携带的采集接口号
+// *capture.ErrSourceUnavailable 并记一条 WARN）。ifaceID 为帧携带的采集接口号
 // （调用方分配，0 保留未知）；log 为 nil 时用 slog.Default()。
 func NewSerialSource(names []string, baud int, ifaceID uint16, log *slog.Logger) *SerialSource {
 	if log == nil {
@@ -118,9 +103,6 @@ func NewSerialSource(names []string, baud int, ifaceID uint16, log *slog.Logger)
 
 // Name 源标识。
 func (s *SerialSource) Name() string { return "serial-ebpf:" + strings.Join(s.names, ",") }
-
-// IfaceID 帧携带的采集接口号（测试/装配断言用）。
-func (s *SerialSource) IfaceID() uint16 { return s.ifaceID }
 
 // tsBase 帧时刻换算基准：Start 时一次采样内核 CLOCK_MONOTONIC 与墙钟的对应关系。
 // eBPF 事件 ts_ns 为 bpf_ktime_get_ns() 单调时刻，换算墙钟 = wall + (ts_ns − mono)。
@@ -150,14 +132,14 @@ func (b tsBase) toWall(tsNs uint64) time.Time {
 
 // unavailable 降级出口：记一条 WARN 后返回带原因的不可用错误，调用方据此跳过该源。
 func (s *SerialSource) unavailable(reason string) error {
-	err := &ErrSerialUnavailable{Reason: reason}
+	err := &capture.ErrSourceUnavailable{Kind: "串口", Reason: reason}
 	s.log.Warn("串口采集源不可用，降级跳过", "err", err)
 	return err
 }
 
 // Start 装载 eBPF（能力探测）→ 双 kprobe 挂点 → ringbuf 读循环，字节块按 tty_name
 // 分流进各口 Framer，切帧转 capture.Frame（LinkType 147）推给调用方。
-// 装载/挂点任一步失败即整体失败：返回带原因的 *ErrSerialUnavailable（已记 WARN），
+// 装载/挂点任一步失败即整体失败：返回带原因的 *capture.ErrSourceUnavailable（已记 WARN），
 // 不起循环不 panic。
 func (s *SerialSource) Start(ctx context.Context, push func(capture.Frame)) error {
 	// 能力探测：装载即冒烟（校验 BTF/ringbuf/指令集）；失败带原因降级，不 panic。
@@ -211,20 +193,11 @@ func (s *SerialSource) readLoop(rd *ringbuf.Reader, push func(capture.Frame)) {
 	for {
 		rec, err := rd.Read()
 		if err != nil {
-			// Close 触发的预期退出。
-			if errors.Is(err, perf.ErrClosed) {
-				return
-			}
-			s.mu.Lock()
-			s.drops++
-			s.mu.Unlock()
+			// Close 触发的预期退出；真实读错误（设备消失等）同样终止消费。
 			return
 		}
 		var ev bpfEventT
 		if err := structsUnmarshal(rec.RawSample, &ev); err != nil {
-			s.mu.Lock()
-			s.drops++
-			s.mu.Unlock()
 			continue
 		}
 
@@ -277,7 +250,7 @@ func (s *SerialSource) feed(name string, dir capture.Direction, data []byte, now
 			return NewFramer(FramerConfig{Baud: s.baud, Dir: d, OnFrame: func(fr Frame) {
 				push(capture.Frame{
 					IfaceID:   s.ifaceID,
-					LinkType:  LinkTypeSerial,
+					LinkType:  capture.LinkTypeUser0,
 					Direction: fr.Dir,
 					TS:        fr.TS,
 					Data:      fr.Data,

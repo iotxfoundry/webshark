@@ -114,13 +114,15 @@ func ParseCanFrameMust(b []byte) map[string]string {
 }
 
 func TestStartUnavailableWithoutCANIface(t *testing.T) {
-	// 本机无该 CAN 接口: Start 返回带原因的 ErrCANUnavailable, 不 panic.
+	// 本机无该 CAN 接口: Start 返回带原因的 ErrSourceUnavailable, 不 panic.
 	s := NewCANSource("nosuchcan0", 0)
 	err := s.Start(context.Background(), func(capture.Frame) {})
 	require.Error(t, err)
-	var ue *ErrCANUnavailable
-	require.True(t, errors.As(err, &ue), "应返回 *ErrCANUnavailable, 得到 %T: %v", err, err)
+	var ue *capture.ErrSourceUnavailable
+	require.True(t, errors.As(err, &ue), "应返回 *capture.ErrSourceUnavailable, 得到 %T: %v", err, err)
 	assert.NotEmpty(t, ue.Reason)
+	// 文案逐字节锁定(与移植源 ErrCANUnavailable 原文案一致)
+	assert.Equal(t, "CAN 采集源不可用: "+ue.Reason, ue.Error())
 	require.NoError(t, s.Stop()) // 失败路径 Stop 幂等清理
 }
 

@@ -256,6 +256,6 @@ func TestCanFrameBE(t *testing.T) {
 
 // TestLinkTypeConstants 常量锚: 147(USER0)/227(SocketCAN) 值域锁定.
 func TestLinkTypeConstants(t *testing.T) {
-	assert.EqualValues(t, 147, LinkTypeUser0)
-	assert.EqualValues(t, 227, LinkTypeSocketCAN)
+	assert.EqualValues(t, 147, capture.LinkTypeUser0)
+	assert.EqualValues(t, 227, capture.LinkTypeSocketCAN)
 }

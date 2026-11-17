@@ -16,9 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/iotxfoundry/webshark/internal/capture"
-	"github.com/iotxfoundry/webshark/internal/capture/can"
 	"github.com/iotxfoundry/webshark/internal/capture/pcapng"
-	"github.com/iotxfoundry/webshark/internal/capture/serial"
 )
 
 // stubSource 测试桩源: startErr 非空时 Start 即失败; 否则运行 run(缺省阻塞至
@@ -72,8 +70,8 @@ func TestParseSerial(t *testing.T) {
 // 无致命错误且 started=0, main 侧据此以退出码 1 结束.
 func TestRunSourcesAllUnavailable(t *testing.T) {
 	srcs := []source{
-		&stubSource{name: "ttyUSB0", startErr: &serial.ErrSerialUnavailable{Reason: "装载失败"}},
-		&stubSource{name: "can0", startErr: &can.ErrCANUnavailable{Reason: "接口不存在"}},
+		&stubSource{name: "ttyUSB0", startErr: &capture.ErrSourceUnavailable{Kind: "串口", Reason: "装载失败"}},
+		&stubSource{name: "can0", startErr: &capture.ErrSourceUnavailable{Kind: "CAN", Reason: "接口不存在"}},
 	}
 	started, err := runSources(context.Background(), testLogger(), func(capture.Frame) {}, srcs)
 	assert.NoError(t, err)
@@ -94,18 +92,18 @@ func TestRunSourcesFatalCancelsOthers(t *testing.T) {
 func TestFrameSinkWrite(t *testing.T) {
 	w, err := pcapng.NewRolling(t.TempDir(), 1<<20, 2)
 	require.NoError(t, err)
-	sid, err := w.AddInterface(pcapng.LinkTypeSocketCAN, "can0")
+	sid, err := w.AddInterface(capture.LinkTypeSocketCAN, "can0")
 	require.NoError(t, err)
-	uid, err := w.AddInterface(pcapng.LinkTypeUser0, "ttyUSB0")
+	uid, err := w.AddInterface(capture.LinkTypeUser0, "ttyUSB0")
 	require.NoError(t, err)
 
 	sink := &frameSink{w: w, cancel: func() {}, log: testLogger()}
 	now := time.Now()
 	// CAN 帧: 内核序 can_id, push 内换大端落盘.
-	sink.push(capture.Frame{IfaceID: sid, LinkType: can.LinkTypeCAN, TS: now,
+	sink.push(capture.Frame{IfaceID: sid, LinkType: capture.LinkTypeSocketCAN, TS: now,
 		Data: []byte{0x01, 0x02, 0x03, 0x04, 0x03, 0xAA, 0xBB}})
 	// 串口帧: 原样落盘.
-	sink.push(capture.Frame{IfaceID: uid, LinkType: serial.LinkTypeSerial, TS: now, Data: []byte{0x11, 0x03, 0x02}})
+	sink.push(capture.Frame{IfaceID: uid, LinkType: capture.LinkTypeUser0, TS: now, Data: []byte{0x11, 0x03, 0x02}})
 	assert.NoError(t, sink.firstErr())
 	assert.NoError(t, w.Close())
 

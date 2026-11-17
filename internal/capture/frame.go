@@ -16,6 +16,16 @@ import "time"
 // 声明 pcapng 接口块, Wireshark 按 DLT 选 dissector.
 type LinkType uint16
 
+// 落盘链路类型常量(libpcap LINKTYPE 值域): 接口由 daemon 按帧携带的链路类型
+// 懒声明, 无需配置.
+const (
+	// LinkTypeUser0 LINKTYPE_USER0(147): 公司自定义链路类型(串口等私有帧落盘用).
+	LinkTypeUser0 = LinkType(147)
+	// LinkTypeSocketCAN LINKTYPE_CAN_SOCKETCAN(227): SocketCAN 帧, Wireshark
+	// 内建 dissector 深解析.
+	LinkTypeSocketCAN = LinkType(227)
+)
+
 // Frame 单个采集到的原始帧: 含链路层头的字节 + 采集源产出的字段表.
 type Frame struct {
 	IfaceID   uint16            // 采集接口 id(引擎内分配, 0 保留给未知接口)
@@ -37,3 +47,20 @@ const (
 	// RX 本机接收.
 	RX
 )
+
+// ErrSourceUnavailable 采集源能力探测失败(接口不存在/内核缺配置/权限不足等),
+// 调用方应降级跳过该源而非中断整体采集. Kind 存源显示名("CAN"/"串口").
+type ErrSourceUnavailable struct {
+	Kind   string
+	Reason string
+}
+
+// Error 与历史两类错误文案逐字节一致: 拉丁显示名后接空格(CAN 采集源不可用),
+// 中文显示名直接相连(串口采集源不可用).
+func (e *ErrSourceUnavailable) Error() string {
+	sep := ""
+	if e.Kind == "CAN" {
+		sep = " "
+	}
+	return e.Kind + sep + "采集源不可用: " + e.Reason
+}

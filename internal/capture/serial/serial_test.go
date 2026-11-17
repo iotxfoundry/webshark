@@ -9,7 +9,7 @@ import (
 )
 
 // TestSerialStartUnavailableWithoutPrivilege 非特权环境：Start 必须返回带原因的
-// *ErrSerialUnavailable，不 panic 不拖垮调用方（root 环境可真装载，跳过本用例）。
+// *capture.ErrSourceUnavailable，不 panic 不拖垮调用方（root 环境可真装载，跳过本用例）。
 func TestSerialStartUnavailableWithoutPrivilege(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root 环境可真加载，本用例只验非特权降级路径")
@@ -20,12 +20,16 @@ func TestSerialStartUnavailableWithoutPrivilege(t *testing.T) {
 		s.Stop()
 		t.Fatal("非特权环境 Start 应失败")
 	}
-	var ue *ErrSerialUnavailable
+	var ue *capture.ErrSourceUnavailable
 	if !errors.As(err, &ue) {
-		t.Fatalf("应返回 *ErrSerialUnavailable，得到 %T: %v", err, err)
+		t.Fatalf("应返回 *capture.ErrSourceUnavailable，得到 %T: %v", err, err)
 	}
 	if ue.Reason == "" {
 		t.Fatal("原因不能为空")
+	}
+	// 文案逐字节锁定(与移植源 ErrSerialUnavailable 原文案一致, 中文显示名不接空格)
+	if want := "串口采集源不可用: " + ue.Reason; ue.Error() != want {
+		t.Fatalf("文案漂移: 得到 %q, 期望 %q", ue.Error(), want)
 	}
 }
 
@@ -34,7 +38,7 @@ func TestFramerFieldsMapping(t *testing.T) {
 	var got capture.Frame
 	f := NewFramer(FramerConfig{Baud: 9600, Dir: capture.TX, OnFrame: func(fr Frame) {
 		got = capture.Frame{
-			LinkType:  LinkTypeSerial,
+			LinkType:  capture.LinkTypeUser0,
 			Direction: fr.Dir,
 			TS:        fr.TS,
 			Data:      fr.Data,

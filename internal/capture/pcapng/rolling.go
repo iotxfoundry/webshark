@@ -86,10 +86,8 @@ func (w *RollingWriter) prune() {
 		return
 	}
 	for _, path := range files[:len(files)-w.maxFiles] {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			// 清理失败不影响写入主流程, 留待下次 prune 重试
-			continue
-		}
+		// 清理失败不影响写入主流程, 留待下次 prune 重试
+		_ = os.Remove(path)
 	}
 }
 

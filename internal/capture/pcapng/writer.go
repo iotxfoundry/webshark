@@ -16,16 +16,6 @@ import (
 	"github.com/iotxfoundry/webshark/internal/capture"
 )
 
-// 落盘链路类型常量(libpcap LINKTYPE 值域): 接口由 daemon 按帧携带的链路类型
-// 懒声明, 无需配置.
-const (
-	// LinkTypeUser0 LINKTYPE_USER0(147): 公司自定义链路类型(串口等私有帧落盘用).
-	LinkTypeUser0 = capture.LinkType(147)
-	// LinkTypeSocketCAN LINKTYPE_CAN_SOCKETCAN(227): SocketCAN 帧, Wireshark
-	// 内建 dissector 深解析.
-	LinkTypeSocketCAN = capture.LinkType(227)
-)
-
 // pcapng 块类型(规范 Block Type 值).
 const (
 	blockSHB = 0x0A0D0D0A // Section Header Block
@@ -45,17 +35,26 @@ var ErrClosed = errors.New("pcapng: 写入器已关闭")
 // pad4 n 向上补齐到 4 字节边界的填充数(pcapng 块内各字段 4 字节对齐).
 func pad4(n int) int { return (4 - n&3) & 3 }
 
+// encodeBlock 统一块封装: 块类型 + 头部 total 长度 + body + 尾部 total 长度
+// (首尾各写一次), 总长按 body 补齐至 4 字节对齐. body 为块体, 不含首尾 total 字段.
+func encodeBlock(t uint32, body []byte) []byte {
+	total := uint32(12 + len(body) + pad4(len(body)))
+	b := make([]byte, 8, int(total))
+	binary.LittleEndian.PutUint32(b[0:4], t)
+	binary.LittleEndian.PutUint32(b[4:8], total)
+	b = append(b, body...)
+	b = append(b, make([]byte, pad4(len(body)))...)
+	return binary.LittleEndian.AppendUint32(b, total)
+}
+
 // shbBlock Section Header Block(32B): magic 1A2B3C4D 标识小端, 版本 1.0,
 // 段长未指定(-1), opt_endofopt 收尾.
 func shbBlock() []byte {
-	b := make([]byte, 32)
-	binary.LittleEndian.PutUint32(b[0:4], blockSHB)
-	binary.LittleEndian.PutUint32(b[4:8], 32)
-	binary.LittleEndian.PutUint32(b[8:12], 0x1A2B3C4D)
-	binary.LittleEndian.PutUint16(b[12:14], 1) // major
-	// b[14:16] minor=0, b[16:24] 段长全 1(未指定), b[24:28] opt_endofopt(码 0 长 0)
-	binary.LittleEndian.PutUint32(b[28:32], 32)
-	return b
+	body := make([]byte, 20)
+	binary.LittleEndian.PutUint32(body[0:4], 0x1A2B3C4D)
+	binary.LittleEndian.PutUint16(body[4:6], 1) // major
+	// body[6:8] minor=0, body[8:16] 段长未指定, body[16:20] opt_endofopt(码 0 长 0)
+	return encodeBlock(blockSHB, body)
 }
 
 // idbBlock Interface Description Block: linktype + snaplen(0x40000, 不截断常规帧)
@@ -72,30 +71,20 @@ func idbBlock(linkType capture.LinkType, name string) []byte {
 	}
 	body = binary.LittleEndian.AppendUint16(body, optEndOfOpt)
 	body = binary.LittleEndian.AppendUint16(body, 0)
-	total := uint32(8 + len(body) + 4)
-	b := make([]byte, 8, int(total))
-	binary.LittleEndian.PutUint32(b[0:4], blockIDB)
-	binary.LittleEndian.PutUint32(b[4:8], total)
-	b = append(b, body...)
-	return binary.LittleEndian.AppendUint32(b, total)
+	return encodeBlock(blockIDB, body)
 }
 
 // epbBlock Enhanced Packet Block: 接口号 + 微秒时间戳(规范缺省 if_tsresol=6)
 // + caplen/origlen + 数据(4 字节对齐填充), 无选项区.
 func epbBlock(ifaceID uint16, ts time.Time, data []byte) []byte {
 	micros := uint64(ts.Unix())*1e6 + uint64(ts.Nanosecond())/1e3
-	total := uint32(32 + len(data) + pad4(len(data)))
-	b := make([]byte, 8, int(total))
-	binary.LittleEndian.PutUint32(b[0:4], blockEPB)
-	binary.LittleEndian.PutUint32(b[4:8], total)
-	b = binary.LittleEndian.AppendUint32(b, uint32(ifaceID))
-	b = binary.LittleEndian.AppendUint32(b, uint32(micros>>32))
-	b = binary.LittleEndian.AppendUint32(b, uint32(micros))
-	b = binary.LittleEndian.AppendUint32(b, uint32(len(data)))
-	b = binary.LittleEndian.AppendUint32(b, uint32(len(data)))
-	b = append(b, data...)
-	b = append(b, make([]byte, pad4(len(data)))...)
-	return binary.LittleEndian.AppendUint32(b, total)
+	body := binary.LittleEndian.AppendUint32(make([]byte, 0, 20+len(data)), uint32(ifaceID))
+	body = binary.LittleEndian.AppendUint32(body, uint32(micros>>32))
+	body = binary.LittleEndian.AppendUint32(body, uint32(micros))
+	body = binary.LittleEndian.AppendUint32(body, uint32(len(data)))
+	body = binary.LittleEndian.AppendUint32(body, uint32(len(data)))
+	body = append(body, data...)
+	return encodeBlock(blockEPB, body)
 }
 
 // countWriter 包装文件统计已写字节, 供滚动判断当前分片体积.
@@ -226,4 +215,17 @@ func (w *Writer) Close() error {
 		return fmt.Errorf("关闭文件: %w", err)
 	}
 	return nil
+}
+
+// CanFrameBE SocketCAN 载荷字节序换转: 内核 can_frame/canfd_frame 的 can_id/flags 字段
+// 为主机序(LE), Wireshark 对 LINKTYPE_CAN_SOCKETCAN 默认按大端读 —— 前 4B 换大端,
+// 其余(len/flags/data)原样. 采集源推帧为内核字节序, 落盘前换转.
+func CanFrameBE(kernel []byte) []byte {
+	if len(kernel) < 4 {
+		return kernel
+	}
+	be := make([]byte, len(kernel))
+	copy(be, kernel)
+	binary.BigEndian.PutUint32(be, binary.LittleEndian.Uint32(kernel[:4]))
+	return be
 }
