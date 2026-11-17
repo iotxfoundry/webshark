@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/iotxfoundry/webshark/internal/stream"
+	"github.com/iotxfoundry/webshark/sharkd"
 )
 
 // maxTapDetails 单次 tap 明细上限，按帧序保留前 N 条：界面上万条明细也无法
@@ -109,6 +110,15 @@ func (s *Server) handleFrame(w http.ResponseWriter, r *http.Request) {
 	// 代价是同片首次多一次 load ≈ 百毫秒，LRU 驻留后命中零 load）。
 	res, err := s.cache.frame(r.Context(), shard, params)
 	if err != nil {
+		var se *sharkd.Error
+		if errors.As(err, &se) && se.Code == -8003 {
+			// 帧号越界：load 成功但目标分片当前内容的帧数少于所查帧号——分片文件
+			// 被同名覆盖（dumpcap 重启会从 00001 重写）或已清理，旧引用的帧已不存在。
+			// 给出可行动的中文说明，而非透传 sharkd 英文原文。
+			writeErr(w, http.StatusNotFound, se.Code,
+				"该帧不存在：分片内容可能已被覆盖（抓包进程重启会重写同名分片）或已清理，请刷新列表")
+			return
+		}
 		writeSharkErr(w, err, http.StatusNotFound, "分片不存在或已被清理")
 		return
 	}

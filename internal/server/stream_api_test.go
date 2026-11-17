@@ -138,3 +138,25 @@ func TestTapDetailsCapped(t *testing.T) {
 		require.Len(t, taps[0].(map[string]any)["details"], 2)
 	})
 }
+
+// TestFrameOutOfRangeShardContentReplaced 锁定「分片内容被覆盖」的降级契约：
+// 旧行引用的分片在磁盘上被同名覆盖（dumpcap 重启会重写同名分片）后，load 仍
+// 成功但帧号越界（sharkd -8003）→ 404 + 明确中文说明（含覆盖/清理原因），
+// 而非透传 sharkd 英文原文让使用者无从判断。
+func TestFrameOutOfRangeShardContentReplaced(t *testing.T) {
+	_, ts, spoolDir, sock := newServer(t, nil)
+	sock.frameRange = 100 // 假 sharkd: 帧号 >100 视为越界
+	writeShard(t, spoolDir, "live.pcapng", time.Unix(1700000000, 0), []byte("pcap"))
+	ws, err := dialWS(t, ts, nil, "handle=st-oob")
+	require.NoError(t, err)
+	readFrame(t, ws) // hello
+	require.Eventually(t, func() bool {
+		_, body := postJSON(t, ts, "/api/subscribe", `{"handle":"st-oob"}`)
+		return body["shard"] == "live.pcapng"
+	}, 10*time.Second, 50*time.Millisecond, "实时实例未就绪")
+
+	code, body := getJSON(t, ts, "/api/frame?handle=st-oob&shard=live.pcapng&num=77478")
+	require.Equal(t, http.StatusNotFound, code)
+	require.Contains(t, body["message"], "覆盖", "应说明分片内容被覆盖的成因")
+	require.Equal(t, float64(-8003), body["code"], "透传 sharkd 错误码供宿主判断")
+}

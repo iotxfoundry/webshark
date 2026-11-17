@@ -35,6 +35,7 @@ type memSharkd struct {
 	loaded     string
 	loads      map[string]int // 分片 basename → load 次数
 	tapDetails int            // 测试用：tap 响应生成的专家明细条数（0=空列表，默认不变）
+	frameRange int            // 测试用：frame 响应的帧号上界（0=不校验，模拟 sharkd -8003 越界）
 }
 
 func startFakeSharkd(t *testing.T) *memSharkd {
@@ -134,6 +135,9 @@ func (m *memSharkd) dispatch(req fakeReq, p fakeParams, snap *string) []byte {
 		*snap = base
 		return resp(`{"err":0}`)
 	case "frame":
+		if m.frameRange > 0 && p.Frame > m.frameRange {
+			return respErr(-8003, "Invalid frame - The frame number requested is out of range")
+		}
 		return resp(fmt.Sprintf(`{"err":0,"num":%d,"loaded":%q,"tree":"detail-%d"}`, p.Frame, *snap, p.Frame))
 	case "check":
 		if strings.Contains(p.Filter, "bad") {
