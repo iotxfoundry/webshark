@@ -24,3 +24,11 @@ export const websharkBrand: BrandVariants = {
 
 export const websharkDarkTheme: Theme = createDarkTheme(websharkBrand);
 export const websharkLightTheme: Theme = createLightTheme(websharkBrand);
+
+// 全站唯一字体（main.tsx 自托管 @fontsource/fira-code）：Fluent 组件（Tab、
+// 按钮、菜单等界面件）默认用主题字体栈（Segoe UI 系），会与数据区 Fira Code
+// 割裂——覆盖主题 fontFamily 统一为 Fira Code；中文不在其覆盖范围，续接系统
+// 无衬线 fallback。
+for (const t of [websharkDarkTheme, websharkLightTheme]) {
+  t.fontFamilyBase = '"Fira Code", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+}
