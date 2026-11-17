@@ -15,7 +15,8 @@
 #   SHARKD_SOCK      sharkd Unix socket 路径             /run/webshark/sharkd.sock
 #   SERIAL_PORTS     串口采集列表, 逗号分隔
 #                    "/dev/ttyUSB0@115200,/dev/ttyUSB1@9600"（@波特率缺省 115200,
-#                    仅用于 Modbus RTU 3.5 字符静默成帧, 不碰 termios）; 空 = 不采串口
+#                    仅用于 3.5 字符静默成帧时序, 不碰 termios）; 空 = 不采串口
+#                    协议无关采集, 深度解析由 sharkd 侧 Lua 分发器完成
 #   CAN_IFACES       SocketCAN 接口名, 逗号分隔 "can0,can1"; 空 = 不采 CAN
 #                    两者都空则 pktdump 整个不起
 #
@@ -79,6 +80,17 @@ fi
 
 # 串口/CAN 采集: 任一非空即拉起 pktdump(空参数的源在其内部跳过);
 # 崩溃/全部源不可用退出后 2s 自动拉起
+if [ -n "$SERIAL_PORTS" ]; then
+	# USER0 深度解析装配: 把镜像内 Lua 分发器装进 sharkd 个人插件目录, 并写 user_dlts。
+	# user_dlts 占位行 "User 0 (DLT=147)" 的 payload 解析失败无害, 但行必须存在——
+	# 实证它是 sharkd 把 USER0(LINKTYPE 147) 帧交给 Lua 分发器 webshark_serial 的
+	# 触发条件, 缺行则 USER0 帧出不来协议树。
+	mkdir -p "$HOME/.config/wireshark" "$HOME/.config/wireshark/plugins"
+	cp /usr/local/share/webshark/webshark_serial.lua \
+		"$HOME/.config/wireshark/plugins/webshark_serial.lua"
+	printf '%s\n' '"User 0 (DLT=147)","webshark_serial","","0","",0' \
+		> "$HOME/.config/wireshark/user_dlts"
+fi
 if [ -n "$SERIAL_PORTS" ] || [ -n "$CAN_IFACES" ]; then
 	(
 		while :; do

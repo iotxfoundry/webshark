@@ -1,5 +1,6 @@
 // Package serial 串口采集源：eBPF 挂 tty 层抓任意进程的串口字节流（tty 排他，
-// 应用侧无法自行埋点），用户态按 Modbus RTU 3.5 字符静默定界切帧。
+// 应用侧无法自行埋点），用户态按 3.5 字符静默成帧（字节累积 + 静默超时切帧，
+// 协议无关；帧内语义由 sharkd 侧分发器解析）。
 //
 // 部署前提（不满足时 Start 返回 *capture.ErrSourceUnavailable，调用方降级跳过该源）：
 //
@@ -69,7 +70,7 @@ const (
 )
 
 // SerialSource 串口 eBPF 采集源：一实例服务一组 tty 名（tty->name，如 ttyUSB0），
-// 每口 TX/RX 各一个 Framer 定界，切出的 RTU 帧转 capture.Frame 推给调用方。
+// 每口 TX/RX 各一个 Framer 静默成帧，切出的字节帧转 capture.Frame 推给调用方。
 type SerialSource struct {
 	names   []string
 	baud    int
@@ -183,7 +184,7 @@ func (s *SerialSource) Start(ctx context.Context, push func(capture.Frame)) erro
 	s.mu.Unlock()
 
 	s.wg.Go(func() { s.readLoop(rd, push) })
-	// 周期 FlushIdle：静默超时切表外帧（锁长帧在收满时已即时产出）。
+	// 周期 FlushIdle：静默超时驱动切帧（尾帧落袋）。
 	s.wg.Go(func() { s.flushLoop(ctx) })
 	return nil
 }
@@ -254,7 +255,7 @@ func (s *SerialSource) feed(name string, dir capture.Direction, data []byte, now
 					Direction: fr.Dir,
 					TS:        fr.TS,
 					Data:      fr.Data,
-					Fields:    fieldsOf(name, fr),
+					Fields:    fieldsOf(name),
 				})
 			}})
 		}
@@ -299,24 +300,13 @@ func (s *SerialSource) Stop() error {
 	return nil
 }
 
-// fieldsOf 帧 → 字段表：proto/iface/serial.tty/rtu.slave/rtu.func/rtu.dir 必填，
-// CRC 失败加 rtu.crcfail=1。iface 为 tty 名：落盘与 UI Details 读 Fields["iface"]。
-func fieldsOf(tty string, fr Frame) map[string]string {
-	f := map[string]string{
-		"proto":      "modbus-rtu",
+// fieldsOf 帧 → 字段表：iface/serial.tty 必填，落盘与 UI Details 读 Fields["iface"]；
+// 协议字段（Modbus/FT1.2/DL/T 645 等）由 sharkd 侧 Lua 分发器产出，采集层不认协议。
+func fieldsOf(tty string) map[string]string {
+	return map[string]string{
 		"iface":      tty,
 		"serial.tty": tty,
-		"rtu.slave":  fmt.Sprintf("%d", fr.Slave),
-		"rtu.func":   fmt.Sprintf("%d", fr.Func),
-		"rtu.dir":    "tx",
 	}
-	if fr.Dir == capture.RX {
-		f["rtu.dir"] = "rx"
-	}
-	if !fr.CRCOK {
-		f["rtu.crcfail"] = "1"
-	}
-	return f
 }
 
 // cstr 取定长 char 数组的 C 字符串（首个 NUL 截断）。

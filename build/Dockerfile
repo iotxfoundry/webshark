@@ -12,6 +12,7 @@ RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sou
 COPY bin/webshark /usr/local/bin/webshark
 COPY bin/pktdump /usr/local/bin/pktdump
 COPY build/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY build/serial/webshark_serial.lua /usr/local/share/webshark/webshark_serial.lua
 RUN chmod 0755 /usr/local/bin/entrypoint.sh
 ENV SPOOL=/var/lib/webshark \
     LISTEN=0.0.0.0:8080 \

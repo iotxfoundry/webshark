@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/iotxfoundry/webshark/internal/capture"
 )
@@ -33,8 +34,10 @@ func TestSerialStartUnavailableWithoutPrivilege(t *testing.T) {
 	}
 }
 
-// TestFramerFieldsMapping Frame → capture.Frame 字段映射（含 crcfail 与方向），纯用户态。
+// TestFramerFieldsMapping Frame → capture.Frame 字段映射（协议无关：采集层只有
+// iface/serial.tty，协议字段全部由 sharkd 侧 Lua 分发器产出），纯用户态。
 func TestFramerFieldsMapping(t *testing.T) {
+	raw := []byte{0x10, 0x40, 0x05, 0x6B, 0x16}
 	var got capture.Frame
 	f := NewFramer(FramerConfig{Baud: 9600, Dir: capture.TX, OnFrame: func(fr Frame) {
 		got = capture.Frame{
@@ -42,25 +45,21 @@ func TestFramerFieldsMapping(t *testing.T) {
 			Direction: fr.Dir,
 			TS:        fr.TS,
 			Data:      fr.Data,
-			Fields:    fieldsOf("ttyUSB0", fr),
+			Fields:    fieldsOf("ttyUSB0"),
 		}
 	}})
-	f.Feed(fc16req, base)
+	f.Feed(raw, base)
+	f.FlushIdle(base.Add(5 * time.Millisecond)) // 静默超窗驱动出帧
 	if got.LinkType != 147 {
 		t.Fatalf("LinkType 应为 147（USER0），得到 %d", got.LinkType)
 	}
-	if got.Fields["proto"] != "modbus-rtu" {
-		t.Fatalf("proto 应为 modbus-rtu，得到 %q", got.Fields["proto"])
+	if got.Fields["iface"] != "ttyUSB0" || got.Fields["serial.tty"] != "ttyUSB0" {
+		t.Fatalf("iface/serial.tty 应透传 tty 名，得到 %v", got.Fields)
 	}
-	if got.Fields["serial.tty"] != "ttyUSB0" || got.Fields["rtu.slave"] != "1" ||
-		got.Fields["rtu.func"] != "16" || got.Fields["rtu.dir"] != "tx" {
-		t.Fatalf("字段表不对: %v", got.Fields)
-	}
-	if got.Fields["iface"] != "ttyUSB0" {
-		t.Fatalf("iface 应透传 tty 名，得到 %q", got.Fields["iface"])
-	}
-	if _, ok := got.Fields["rtu.crcfail"]; ok {
-		t.Fatal("CRC 正常帧不应有 rtu.crcfail")
+	for _, k := range []string{"proto", "rtu.slave", "rtu.func", "rtu.dir", "rtu.crcfail"} {
+		if _, ok := got.Fields[k]; ok {
+			t.Fatalf("采集层不得产出协议字段 %q（归 Lua 分发器）", k)
+		}
 	}
 }
 
@@ -73,7 +72,14 @@ func TestSerialSourceFrameIfaceID(t *testing.T) {
 	s.mu.Unlock()
 	var got capture.Frame
 	push := func(f capture.Frame) { got = f }
-	s.feed("ttyUSB0", capture.TX, fc16req, base, push)
+	s.feed("ttyUSB0", capture.TX, []byte{0x10, 0x40, 0x05, 0x6B, 0x16}, base, push)
+	// feed 本身不出帧（无静默驱动），补一次 FlushIdle 驱动尾帧落袋。
+	s.mu.Lock()
+	for _, p := range s.fr {
+		p.tx.FlushIdle(base.Add(5 * time.Millisecond))
+		p.rx.FlushIdle(base.Add(5 * time.Millisecond))
+	}
+	s.mu.Unlock()
 	if got.IfaceID != 7 {
 		t.Fatalf("IfaceID 应为 7（源分配号），得到 %d", got.IfaceID)
 	}

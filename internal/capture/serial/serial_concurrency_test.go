@@ -26,13 +26,14 @@ func TestSerialSourceFeedFlushIdleRace(t *testing.T) {
 
 	stop := time.Now().Add(time.Second)
 	var wg sync.WaitGroup
-	// 模拟 readLoop 的 feed 路径。
+	// 模拟 readLoop 的 feed 路径；间隔取 2ms > t35(115200)=1.75ms，保证静默
+	// 周期性切帧（成帧器只认字节时序，帧内容无协议含义）。
 	wg.Go(func() {
 		i := 0
 		for time.Now().Before(stop) {
-			s.feed("ttyUSB0", capture.RX, []byte{byte(i), 0x03, 0xC5, 0xCD}, time.Now(), push)
+			s.feed("ttyUSB0", capture.RX, []byte{byte(i), 0x40, 0x05, 0x16}, time.Now(), push)
 			i++
-			time.Sleep(50 * time.Microsecond)
+			time.Sleep(2 * time.Millisecond)
 		}
 	})
 	// 模拟 flushLoop 路径（周期 FlushIdle 全部 Framer）。

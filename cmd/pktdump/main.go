@@ -33,7 +33,7 @@ import (
 const defaultBaud = 115200
 
 // serialPort 单串口配置: tty 为内核 tty 名(ttyUSB0, eBPF 事件按 tty->name 匹配,
-// 故剥掉 /dev/ 前缀); baud 只影响 RTU 成帧的 3.5 字符静默时长, 不碰 termios.
+// 故剥掉 /dev/ 前缀); baud 只影响成帧的 3.5 字符静默时长, 不碰 termios.
 type serialPort struct {
 	tty  string
 	baud int
@@ -183,7 +183,7 @@ func run() int {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	var (
-		serialArg = flag.String("serial", "", `串口列表, 逗号分隔 "/dev/ttyUSB0@115200,/dev/ttyUSB1@9600", @波特率缺省 115200(仅用于 RTU 成帧时序); 空=不采串口`)
+		serialArg = flag.String("serial", "", `串口列表, 逗号分隔 "/dev/ttyUSB0@115200,/dev/ttyUSB1@9600", @波特率缺省 115200(仅用于成帧静默时序, 协议无关); 空=不采串口`)
 		canArg    = flag.String("can", "", "SocketCAN 接口名, 逗号分隔 can0,can1; 空=不采 CAN")
 		spool     = flag.String("spool", "/var/lib/webshark", "pcapng 滚动分片目录")
 		roll      = flag.Int64("roll", 8388608, "单分片字节数")
