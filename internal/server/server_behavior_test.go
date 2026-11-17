@@ -34,6 +34,7 @@ type memSharkd struct {
 	mu         sync.Mutex
 	loaded     string
 	loads      map[string]int // 分片 basename → load 次数
+	conns      int            // 已接受的连接数（sharkd 每连接 fork 一子进程）
 	tapDetails int            // 测试用：tap 响应生成的专家明细条数（0=空列表，默认不变）
 	snapFrames int64          // 测试用：load 时的快照帧数（模拟 sharkd load=内存快照：此后文件增长不可见）
 }
@@ -50,6 +51,9 @@ func startFakeSharkd(t *testing.T) *memSharkd {
 			if aerr != nil {
 				return
 			}
+			m.mu.Lock()
+			m.conns++
+			m.mu.Unlock()
 			go m.serve(c)
 		}
 	}()

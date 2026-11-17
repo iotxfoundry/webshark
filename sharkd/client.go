@@ -150,8 +150,11 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 	return res, rerr
 }
 
-// Close 关闭连接（幂等；下次 Call 自动重拨）。
+// Close 关闭连接（幂等；nil 接收者安全，下次 Call 自动重拨）。
 func (c *Client) Close() error {
+	if c == nil {
+		return nil
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.conn == nil {

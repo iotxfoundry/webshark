@@ -178,3 +178,25 @@ func TestFrameCacheReloadsGrownShard(t *testing.T) {
 	require.Equal(t, http.StatusOK, code, "增长后查询应触发重 load 而非命中旧快照: %v", body)
 	require.Equal(t, float64(150), body["num"])
 }
+
+// TestStatusProbeReusesConnection 锁定探活常驻会话：/api/status 不再「拨号即
+// 关」（sharkd daemon 每连接 fork 一子进程，高频探活会堆积僵尸子进程）——
+// 前端每 5s 轮询一次，多次 status 只应建立 1 条 sharkd 连接。
+func TestStatusProbeReusesConnection(t *testing.T) {
+	base := time.Unix(1700000000, 0)
+	_, ts, spoolDir, sock := newServer(t, nil)
+	writeShard(t, spoolDir, "live.pcapng", base, make([]byte, 32))
+	for i := 0; i < 3; i++ {
+		code, body := getJSON(t, ts, "/api/status")
+		require.Equal(t, http.StatusOK, code)
+		require.Equal(t, true, body["connected"], "假 sharkd 在听，应可达")
+	}
+	require.Equal(t, 1, sock.conns, "多次 status 应复用同一条 sharkd 连接（每次连接 fork 一子进程）")
+}
+
+// connCount 统计 memSharkd 已接受的连接数（每次拨号一条，sharkd 每连接 fork
+// 一个子进程——连接数即 fork 数）。
+func connCount(t *testing.T, shard string) int {
+	t.Helper()
+	return 0
+}

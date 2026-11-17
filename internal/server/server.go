@@ -8,11 +8,13 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/iotxfoundry/webshark/internal/stream"
+	"github.com/iotxfoundry/webshark/sharkd"
 	"github.com/iotxfoundry/webshark/web"
 )
 
@@ -35,6 +37,8 @@ type Server struct {
 	log        *slog.Logger
 	mgr        *stream.Manager
 	cache      *shardCache
+	probe      *sharkd.Client
+	probeMu    sync.Mutex
 	upgr       websocket.Upgrader
 	webFS      fs.FS
 	hasSPA     bool
@@ -57,6 +61,7 @@ func New(cfg Config) *Server {
 		log:        cfg.Log,
 		mgr:        mgr,
 		cache:      newShardCache(cfg.SharkdSock, cfg.SpoolDir),
+		probe:      sharkd.NewClient(cfg.SharkdSock),
 		upgr:       websocket.Upgrader{ReadBufferSize: 4096, WriteBufferSize: 4096, CheckOrigin: checkOrigin},
 		webFS:      cfg.Web,
 		pongWait:   defaultPongWait,
@@ -67,6 +72,8 @@ func New(cfg Config) *Server {
 	s.close = func() error {
 		mgr.Close()
 		s.cache.Close()
+		_ = s.probe.Close() // nil 接收者安全
+		s.probe = nil
 		return nil
 	}
 	return s
