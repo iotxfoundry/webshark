@@ -17,40 +17,23 @@ local function crc16ok(buf)
   return crc % 256 == buf(n-2,1):uint() and (crc >> 8) == buf(n-1,1):uint()
 end
 
--- FT1.2（IEC 60870-5-101/102/103 链路层）:
---   固定帧 10 C A CS 16, CS = (C + A) mod 256;
---   可变帧 68 L L 68 用户数据 CS 16, L 重复两次, CS = 链路用户数据字节和 mod 256。
--- 校验错仅在树上标 "(错)" 不丢帧（现场证据优先）。
+-- FT1.2（IEC 60870-5-101/102/103 共用链路层）: 内建 iec60870_101 自带完整
+-- FT1.2 成帧 + ASDU 解析, 形态匹配即整帧链回（101/103 链路帧形态相同, 默认按
+-- 101 解析; 103 场景可在 sharkd 侧换 iec60870_5_103）。校验交给内建。
+local iec101 = Dissector.get("iec60870_101")
 local function ft12(buf, pinfo, tree)
-  local b0 = buf(0,1):uint()
-  if b0 == 0x10 then
-    -- 固定帧: 5 字节, C(1) A(2) CS(3) 结束 0x16(4)
-    if buf:len() ~= 5 or buf(4,1):uint() ~= 0x16 then return false end
-    local sum = buf(1,1):uint() + buf(2,1):uint()
-    local okcs = sum % 256 == buf(3,1):uint()
-    local t = tree:add(p, buf(), "FT1.2 固定帧 (IEC 101/102/103)")
-    t:add(buf(1,1), "控制域 C"); t:add(buf(2,1), "地址域 A")
-    t:add(buf(3,1), "校验和 CS" .. (okcs and "" or " (错)"))
-    t:add(buf(4,1), "结束 0x16")
-    pinfo.cols.protocol = "FT12"
-    return true
-  end
-  if b0 ~= 0x68 then return false end
-  -- 可变帧: 68 L L 68 + 链路用户数据 + CS + 16, 最短 68 00 00 68 CS 16 共 6 字节
   local n = buf:len()
-  if n < 6 or buf(1,1):uint() ~= buf(2,1):uint() or buf(3,1):uint() ~= 0x68
-    or buf(n-1,1):uint() ~= 0x16 then return false end
-  local L = buf(1,1):uint()
-  if n ~= L + 6 then return false end
-  local sum = 0
-  for i = 4, n - 3 do sum = sum + buf(i,1):uint() end -- 链路用户数据（不含 CS）
-  local okcs = sum % 256 == buf(n-2,1):uint()
-  local t = tree:add(p, buf(), "FT1.2 可变帧 (IEC 101/102/103), L=" .. L)
-  t:add(buf(1,2), "起始长度 L L"); t:add(buf(3,1), "起始 0x68")
-  t:add(buf(4, L), "链路用户数据")
-  t:add(buf(n-2,1), "校验和 CS" .. (okcs and "" or " (错)"))
-  t:add(buf(n-1,1), "结束 0x16")
-  pinfo.cols.protocol = "FT12"
+  local b0 = buf(0,1):uint()
+  local shaped = false
+  if b0 == 0x10 then
+    shaped = n == 5 and buf(4,1):uint() == 0x16
+  elseif b0 == 0x68 then
+    shaped = n >= 6 and buf(1,1):uint() == buf(2,1):uint()
+      and buf(3,1):uint() == 0x68 and buf(n-1,1):uint() == 0x16
+      and n == buf(1,1):uint() + 6
+  end
+  if not shaped then return false end
+  iec101:call(buf, pinfo, tree)
   return true
 end
 
