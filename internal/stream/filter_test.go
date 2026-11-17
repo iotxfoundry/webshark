@@ -15,6 +15,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
+
+	"github.com/iotxfoundry/webshark/internal/testutil"
 )
 
 // TestFilterEnterSweepResubmitExit 锁定筛选主链路：进入 → reset 清视图 → 逐片
@@ -26,15 +28,15 @@ func TestFilterEnterSweepResubmitExit(t *testing.T) {
 	base := time.Now()
 	// mtime 全部取过去时刻（不变量：活动片 mtime 恒最新——追加会把 mtime 重置
 	// 为墙钟，未来 mtime 会令最新分片判定翻转致重走查假象）
-	writeShard(t, spoolDir, "s1.pcapng", base.Add(-9*time.Minute), []byte("a"))
-	writeShard(t, spoolDir, "s2.pcapng", base.Add(-6*time.Minute), []byte("b"))
+	testutil.WriteShard(t, spoolDir, "s1.pcapng", base.Add(-9*time.Minute), []byte("a"))
+	testutil.WriteShard(t, spoolDir, "s2.pcapng", base.Add(-6*time.Minute), []byte("b"))
 	m := startMemSharkd(t)
-	m.setRows("s1.pcapng", 2)
-	m.setRows("s2.pcapng", 3)
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
+	m.SetRows("s1.pcapng", 2)
+	m.SetRows("s2.pcapng", 3)
+	mgr := newManager(t, m.Addr(), spoolDir)
 	sess := mustSession(t, mgr, "tkf")
-	ws := dialSession(t, sess)
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws))
+	ws, _ := dialSession(t, sess, true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	// 冷启动：仅最新片 s2 全量
 	require.Equal(t, []float64{1, 2, 3}, rowsNums(t, readUntilType(t, ws, "rows", 5*time.Second)))
 
@@ -49,7 +51,7 @@ func TestFilterEnterSweepResubmitExit(t *testing.T) {
 	m2 := readUntilType(t, ws, "rows", 5*time.Second)
 	require.Equal(t, "s2.pcapng", m2["shard"])
 	require.Equal(t, []float64{1, 2, 3}, rowsNums(t, m2))
-	require.True(t, hasLine(m.written(), `"filter":"tcp"`), "筛选拉取须透传 filter: %v", m.written())
+	require.True(t, hasLine(m.Written(), `"filter":"tcp"`), "筛选拉取须透传 filter: %v", m.Written())
 	require.Equal(t, "tcp", sess.Filter())
 	readNoFrame(t, ws) // 追平静默（连接读超时弃用）
 	_ = ws.Close()
@@ -57,11 +59,11 @@ func TestFilterEnterSweepResubmitExit(t *testing.T) {
 	// 轮换：s3/s4 落盘 → 走查续推 s3；活动分片 s4 参与走查（全量当前内容）。
 	// 重连：走查进度（位置）与筛选状态随流，续推不重不漏（首帧可能为 rotated
 	// ——attach 与扇出竞态，walk 读到 rows 为止）。
-	writeShard(t, spoolDir, "s3.pcapng", base.Add(-3*time.Minute), []byte("c"))
-	writeShard(t, spoolDir, "s4.pcapng", base.Add(-1*time.Minute), []byte("d"))
-	m.setRows("s3.pcapng", 2)
-	m.setRows("s4.pcapng", 1)
-	ws2 := dialSession(t, sess)
+	testutil.WriteShard(t, spoolDir, "s3.pcapng", base.Add(-3*time.Minute), []byte("c"))
+	testutil.WriteShard(t, spoolDir, "s4.pcapng", base.Add(-1*time.Minute), []byte("d"))
+	m.SetRows("s3.pcapng", 2)
+	m.SetRows("s4.pcapng", 1)
+	ws2, _ := dialSession(t, sess, true)
 	// 重连与走查并行：attach 前 worker 可能已推 s3 甚至 s4 行（旧连接销毁丢弃）。
 	// 断言只锁走查覆盖：s3 行集与 s4 行集按序最终到达（复合键唯一，不重）。
 	m3 := readUntilType(t, ws2, "rows", 10*time.Second)
@@ -83,22 +85,22 @@ func TestFilterEnterSweepResubmitExit(t *testing.T) {
 
 	// 活动分片增长：重 load 后增量续推（冻结快照语义）
 	appendShard(t, spoolDir, "s4.pcapng", 64)
-	m.setRows("s4.pcapng", 2)
+	m.SetRows("s4.pcapng", 2)
 	m4b := readUntilType(t, ws2, "rows", 5*time.Second)
 	require.Equal(t, "s4.pcapng", m4b["shard"])
 	require.Equal(t, []float64{2}, rowsNums(t, m4b))
 	_ = ws2.Close()
 
 	// 同 filter 重提（重连，筛选状态随流）：no-op 不重走查
-	ws3 := dialSession(t, sess)
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws3))
+	ws3, _ := dialSession(t, sess, true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws3))
 	HandleCtl(sess, []byte(`{"type":"_ctl","op":"filter","filter":"tcp"}`))
 	readNoFrame(t, ws3)
 	_ = ws3.Close()
 
 	// 退出：回普通单分片流（s4, mode live）
-	ws4 := dialSession(t, sess)
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws4))
+	ws4, _ := dialSession(t, sess, true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws4))
 	HandleCtl(sess, []byte(`{"type":"_ctl","op":"filter","filter":""}`))
 	require.Eventually(t, func() bool { // 退出经 worker tick 取走生效
 		return sess.Filter() == ""
@@ -107,20 +109,20 @@ func TestFilterEnterSweepResubmitExit(t *testing.T) {
 	require.Equal(t, "live", liveMsg["mode"])
 	require.Equal(t, "s4.pcapng", liveMsg["shard"], "退出后跳最新分片续推")
 	require.Equal(t, []float64{1, 2}, rowsNums(t, liveMsg))
-	require.False(t, hasLine(m.written(), `"filter":"tcp","limit"`), "普通段拉取不携 filter")
+	require.False(t, hasLine(m.Written(), `"filter":"tcp","limit"`), "普通段拉取不携 filter")
 }
 
 // TestFilterInvalidCheckRejected 锁定 filter 语法校验：轻查询实例 check 失败 →
 // 错误帧提示（reason 非空含校验原文）且不进入筛选（无走查拉取），普通流不受影响。
 func TestFilterInvalidCheckRejected(t *testing.T) {
 	spoolDir := t.TempDir()
-	writeShard(t, spoolDir, "s1.pcapng", time.Now(), []byte("a"))
+	testutil.WriteShard(t, spoolDir, "s1.pcapng", time.Now(), []byte("a"))
 	m := startMemSharkd(t)
-	m.setRows("s1.pcapng", 2)
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
+	m.SetRows("s1.pcapng", 2)
+	mgr := newManager(t, m.Addr(), spoolDir)
 	sess := mustSession(t, mgr, "tki")
-	ws := dialSession(t, sess)
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws))
+	ws, _ := dialSession(t, sess, true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	require.Equal(t, []float64{1, 2}, rowsNums(t, readUntilType(t, ws, "rows", 5*time.Second)))
 
 	HandleCtl(sess, []byte(`{"type":"_ctl","op":"filter","filter":"bad-filter"}`))
@@ -130,7 +132,7 @@ func TestFilterInvalidCheckRejected(t *testing.T) {
 	require.Contains(t, reason, "filter", "reason 须含校验提示: %q", reason)
 	require.Equal(t, "", sess.Filter(), "非法 filter 不进入筛选")
 	readNoFrame(t, ws)
-	require.False(t, hasLine(m.written(), `"filter":"bad-filter","limit"`), "筛选拉取须未发生: %v", m.written())
+	require.False(t, hasLine(m.Written(), `"filter":"bad-filter","limit"`), "筛选拉取须未发生: %v", m.Written())
 }
 
 // TestFilterSwitchResetsView 锁定筛选进入/切换清视图：新进入与切换 filter 均
@@ -139,15 +141,15 @@ func TestFilterInvalidCheckRejected(t *testing.T) {
 func TestFilterSwitchResetsView(t *testing.T) {
 	spoolDir := t.TempDir()
 	base := time.Now()
-	writeShard(t, spoolDir, "s1.pcapng", base, []byte("a"))
-	writeShard(t, spoolDir, "s2.pcapng", base.Add(time.Minute), []byte("b"))
+	testutil.WriteShard(t, spoolDir, "s1.pcapng", base, []byte("a"))
+	testutil.WriteShard(t, spoolDir, "s2.pcapng", base.Add(time.Minute), []byte("b"))
 	m := startMemSharkd(t)
-	m.setRows("s1.pcapng", 2)
-	m.setRows("s2.pcapng", 3)
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
+	m.SetRows("s1.pcapng", 2)
+	m.SetRows("s2.pcapng", 3)
+	mgr := newManager(t, m.Addr(), spoolDir)
 	sess := mustSession(t, mgr, "tkw")
-	ws := dialSession(t, sess)
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws))
+	ws, _ := dialSession(t, sess, true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	require.Equal(t, []float64{1, 2, 3}, rowsNums(t, readUntilType(t, ws, "rows", 5*time.Second)))
 
 	// 新进入 filter A：reset → 走查 s1 → s2
@@ -180,15 +182,15 @@ func TestFilterSwitchResetsView(t *testing.T) {
 func TestFilterSwitchInvalidReason(t *testing.T) {
 	spoolDir := t.TempDir()
 	base := time.Now()
-	writeShard(t, spoolDir, "s1.pcapng", base, []byte("a"))
-	writeShard(t, spoolDir, "s2.pcapng", base.Add(time.Minute), []byte("b"))
+	testutil.WriteShard(t, spoolDir, "s1.pcapng", base, []byte("a"))
+	testutil.WriteShard(t, spoolDir, "s2.pcapng", base.Add(time.Minute), []byte("b"))
 	m := startMemSharkd(t)
-	m.setRows("s1.pcapng", 2)
-	m.setRows("s2.pcapng", 3)
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
+	m.SetRows("s1.pcapng", 2)
+	m.SetRows("s2.pcapng", 3)
+	mgr := newManager(t, m.Addr(), spoolDir)
 	sess := mustSession(t, mgr, "tkv")
-	ws := dialSession(t, sess)
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws))
+	ws, _ := dialSession(t, sess, true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	require.Equal(t, []float64{1, 2, 3}, rowsNums(t, readUntilType(t, ws, "rows", 5*time.Second)))
 
 	HandleCtl(sess, []byte(`{"type":"_ctl","op":"filter","filter":"tcp"}`))
@@ -209,16 +211,16 @@ func TestFilterSwitchInvalidReason(t *testing.T) {
 func TestFilterPauseMidSweep(t *testing.T) {
 	spoolDir := t.TempDir()
 	base := time.Now()
-	writeShard(t, spoolDir, "s1.pcapng", base, []byte("a"))
-	writeShard(t, spoolDir, "s2.pcapng", base.Add(time.Minute), []byte("b"))
+	testutil.WriteShard(t, spoolDir, "s1.pcapng", base, []byte("a"))
+	testutil.WriteShard(t, spoolDir, "s2.pcapng", base.Add(time.Minute), []byte("b"))
 	m := startMemSharkd(t)
-	m.slowFrames = 300 * time.Millisecond // 拉取往返 300ms：暂停必落在 chunk 内（确定性中断点）
-	m.setRows("s1.pcapng", 6000)
-	m.setRows("s2.pcapng", 6000)
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
+	m.SlowFrames = 300 * time.Millisecond // 拉取往返 300ms：暂停必落在 chunk 内（确定性中断点）
+	m.SetRows("s1.pcapng", 6000)
+	m.SetRows("s2.pcapng", 6000)
+	mgr := newManager(t, m.Addr(), spoolDir)
 	sess := mustSession(t, mgr, "tkp")
-	ws := dialSession(t, sess)
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws))
+	ws, _ := dialSession(t, sess, true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	// 先进筛选再谈其余：pendingFilter 在 worker 首轮唤醒即取走（先于冷启动），
 	// 走查是唯一行源（12000 行），暂停/吞吐断言不被 live 冷启动流污染
 	HandleCtl(sess, []byte(`{"type":"_ctl","op":"filter","filter":"tcp"}`))
@@ -310,15 +312,15 @@ func TestFilterPauseMidSweep(t *testing.T) {
 func TestFilterSnapshotThroughput(t *testing.T) {
 	spoolDir := t.TempDir()
 	base := time.Now()
-	writeShard(t, spoolDir, "s1.pcapng", base, []byte("a"))
-	writeShard(t, spoolDir, "s2.pcapng", base.Add(5*time.Minute), []byte("b"))
+	testutil.WriteShard(t, spoolDir, "s1.pcapng", base, []byte("a"))
+	testutil.WriteShard(t, spoolDir, "s2.pcapng", base.Add(5*time.Minute), []byte("b"))
 	m := startMemSharkd(t)
-	m.setRows("s1.pcapng", 3000)
-	m.setRows("s2.pcapng", 3000)
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
+	m.SetRows("s1.pcapng", 3000)
+	m.SetRows("s2.pcapng", 3000)
+	mgr := newManager(t, m.Addr(), spoolDir)
 	sess := mustSession(t, mgr, "tkz")
-	ws := dialSession(t, sess)
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws))
+	ws, _ := dialSession(t, sess, true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	// 常驻快速消费：不限速（背压由队列水位承担）
 	var mu sync.Mutex
 	seen := make(map[string]int)
@@ -373,15 +375,15 @@ func TestFilterSnapshotThroughput(t *testing.T) {
 // 应立即返回——若与追帧同实例则必然排队 ≥2s。
 func TestFilterLightQueryParallelBackfill(t *testing.T) {
 	spoolDir := t.TempDir()
-	writeShard(t, spoolDir, "s1.pcapng", time.Now(), []byte("pcap"))
+	testutil.WriteShard(t, spoolDir, "s1.pcapng", time.Now(), []byte("pcap"))
 	m := startMemSharkd(t)
-	m.slowFrames = 2 * time.Second
-	m.setRows("s1.pcapng", 2000)
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
-	ws := dialSession(t, mustSession(t, mgr, "tkl"))
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws))
+	m.SlowFrames = 2 * time.Second
+	m.SetRows("s1.pcapng", 2000)
+	mgr := newManager(t, m.Addr(), spoolDir)
+	ws, _ := dialSession(t, mustSession(t, mgr, "tkl"), true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	require.Eventually(t, func() bool {
-		return hasLine(m.written(), `"method":"frames"`)
+		return hasLine(m.Written(), `"method":"frames"`)
 	}, 3*time.Second, 20*time.Millisecond, "追帧应在途")
 
 	// check：不被追帧排队（独立轻查询实例）
@@ -398,17 +400,17 @@ func TestFilterLightQueryParallelBackfill(t *testing.T) {
 func TestFilterSweepShardOrdering(t *testing.T) {
 	spoolDir := t.TempDir()
 	base := time.Now()
-	writeShard(t, spoolDir, "a.pcapng", base.Add(-5*time.Minute), []byte("a"))
-	writeShard(t, spoolDir, "b.pcapng", base.Add(-3*time.Minute), []byte("b"))
-	writeShard(t, spoolDir, "c.pcapng", base.Add(-1*time.Minute), []byte("c"))
+	testutil.WriteShard(t, spoolDir, "a.pcapng", base.Add(-5*time.Minute), []byte("a"))
+	testutil.WriteShard(t, spoolDir, "b.pcapng", base.Add(-3*time.Minute), []byte("b"))
+	testutil.WriteShard(t, spoolDir, "c.pcapng", base.Add(-1*time.Minute), []byte("c"))
 	m := startMemSharkd(t)
 	for _, name := range []string{"a.pcapng", "b.pcapng", "c.pcapng"} {
-		m.setRows(name, 2)
+		m.SetRows(name, 2)
 	}
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
+	mgr := newManager(t, m.Addr(), spoolDir)
 	sess := mustSession(t, mgr, "tko2")
-	ws := dialSession(t, sess)
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws))
+	ws, _ := dialSession(t, sess, true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	require.Equal(t, []float64{1, 2}, rowsNums(t, readUntilType(t, ws, "rows", 5*time.Second))) // 冷启动 c
 
 	HandleCtl(sess, []byte(`{"type":"_ctl","op":"filter","filter":"tcp"}`))

@@ -61,9 +61,7 @@ func (c *shardCache) frame(ctx context.Context, shard string, params map[string]
 	}
 
 	// LRU 驻留与驱逐（仅维护登记，不影响本帧查询）
-	if i := slices.Index(c.lru, shard); i >= 0 {
-		c.lru = append(c.lru[:i], c.lru[i+1:]...)
-	}
+	c.removeLocked(shard)
 	c.lru = append(c.lru, shard)
 	if len(c.lru) > shardCacheCap {
 		old := c.lru[0]
@@ -74,11 +72,16 @@ func (c *shardCache) frame(ctx context.Context, shard string, params map[string]
 	return c.c.Call(ctx, "frame", params)
 }
 
-// forget 移除分片的驻留登记（load 失败时调用，避免残留尺寸导致跳过重 load）。
-func (c *shardCache) forget(shard string) {
+// removeLocked 摘除分片的 LRU 驻留登记（持 mu 调用）。
+func (c *shardCache) removeLocked(shard string) {
 	if i := slices.Index(c.lru, shard); i >= 0 {
 		c.lru = append(c.lru[:i], c.lru[i+1:]...)
 	}
+}
+
+// forget 移除分片的驻留登记（load 失败时调用，避免残留尺寸导致跳过重 load）。
+func (c *shardCache) forget(shard string) {
+	c.removeLocked(shard)
 	delete(c.sizes, shard)
 }
 

@@ -9,189 +9,28 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
+
+	"github.com/iotxfoundry/webshark/internal/testutil"
 )
-
-// --- 假 sharkd ---
-
-// memSharkd 模拟 sharkd 会话语义：load 切换当前文件（不存在即 envelope error）；
-// frame 回单帧详情；check 含 "bad" 即语法错；complete 回固定候选；load 次数
-// 可查（LRU 断言）。
-type memSharkd struct {
-	ln         net.Listener
-	mu         sync.Mutex
-	loaded     string
-	loads      map[string]int // 分片 basename → load 次数
-	conns      int            // 已接受的连接数（sharkd 每连接 fork 一子进程）
-	tapDetails int            // 测试用：tap 响应生成的专家明细条数（0=空列表，默认不变）
-	snapFrames int64          // 测试用：load 时的快照帧数（模拟 sharkd load=内存快照：此后文件增长不可见）
-}
-
-func startFakeSharkd(t *testing.T) *memSharkd {
-	t.Helper()
-	ln, err := net.Listen("unix", filepath.Join(t.TempDir(), "sharkd.sock"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = ln.Close() })
-	m := &memSharkd{ln: ln, loads: map[string]int{}}
-	go func() {
-		for {
-			c, aerr := ln.Accept()
-			if aerr != nil {
-				return
-			}
-			m.mu.Lock()
-			m.conns++
-			m.mu.Unlock()
-			go m.serve(c)
-		}
-	}()
-	return m
-}
-
-type fakeReq struct {
-	ID     int             `json:"id"`
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
-}
-
-type fakeParams struct {
-	File   string         `json:"file"`
-	Frame  int            `json:"frame"`
-	Filter string         `json:"filter"`
-	Field  string         `json:"field"`
-	Pref   string         `json:"pref"`
-	Prefix string         `json:"prefix"`
-	Extra  map[string]any `json:"-"`
-}
-
-func (m *memSharkd) serve(c net.Conn) {
-	defer func() { _ = c.Close() }()
-	buf := make([]byte, 0, 64<<10)
-	scanned := make([]byte, 1<<16)
-	var snap string
-	for {
-		n, err := c.Read(scanned)
-		if err != nil {
-			return
-		}
-		buf = append(buf, scanned[:n]...)
-		for {
-			i := indexByte(buf, '\n')
-			if i < 0 {
-				break
-			}
-			line := buf[:i]
-			buf = buf[i+1:]
-			var req fakeReq
-			if json.Unmarshal(line, &req) != nil {
-				continue
-			}
-			m.mu.Lock()
-			var p fakeParams
-			_ = json.Unmarshal(req.Params, &p)
-			resp := m.dispatch(req, p, &snap)
-			m.mu.Unlock()
-			if _, werr := c.Write(append(resp, '\n')); werr != nil {
-				return
-			}
-		}
-	}
-}
-
-// indexByte 小助手（避免 strings 依赖扰动）。
-func indexByte(b []byte, c byte) int {
-	for i, x := range b {
-		if x == c {
-			return i
-		}
-	}
-	return -1
-}
-
-// dispatch 响应生成（持 mu 调用）。
-func (m *memSharkd) dispatch(req fakeReq, p fakeParams, snap *string) []byte {
-	resp := func(result string) []byte {
-		return fmt.Appendf(nil, `{"jsonrpc":"2.0","id":%d,"result":%s}`, req.ID, result)
-	}
-	respErr := func(code int, msg string) []byte {
-		return fmt.Appendf(nil, `{"jsonrpc":"2.0","id":%d,"error":{"code":%d,"message":%q}}`, req.ID, code, msg)
-	}
-	switch req.Method {
-	case "load":
-		if _, err := os.Stat(p.File); err != nil {
-			return respErr(-2, "open "+p.File+": no such file")
-		}
-		base := filepath.Base(p.File)
-		if fi, err := os.Stat(p.File); err == nil {
-			m.snapFrames = fi.Size() // 简化模型：每字节一帧；load=快照，增长需重 load
-		}
-		m.loaded = base
-		m.loads[base]++
-		*snap = base
-		return resp(`{"err":0}`)
-	case "frame":
-		if int64(p.Frame) > m.snapFrames {
-			return respErr(-8003, "Invalid frame - The frame number requested is out of range")
-		}
-		return resp(fmt.Sprintf(`{"err":0,"num":%d,"loaded":%q,"tree":"detail-%d"}`, p.Frame, *snap, p.Frame))
-	case "check":
-		if strings.Contains(p.Filter, "bad") {
-			return respErr(-1, "filter syntax error")
-		}
-		return resp(`{"err":0}`)
-	case "complete":
-		out := map[string]any{}
-		if p.Field != "" {
-			out["field"] = []string{p.Field + ".x"}
-		}
-		if p.Pref != "" {
-			out["pref"] = []string{p.Pref + ".proto"}
-		}
-		b, _ := json.Marshal(out)
-		return resp(string(b))
-	case "follow":
-		return resp(`{"follow":"...text...","err":0}`)
-	case "tap":
-		if m.tapDetails > 0 { // 测试用：按 tapDetails 生成专家明细
-			details := make([]map[string]int, m.tapDetails)
-			for i := range details {
-				details[i] = map[string]int{"frame": i}
-			}
-			b, _ := json.Marshal(map[string]any{
-				"taps": []map[string]any{{"tap": "expert", "type": "expert", "details": details}},
-			})
-			return resp(string(b))
-		}
-		return resp(`{"tap":[],"err":0}`)
-	}
-	return respErr(-32601, "no such method")
-}
-
-func (m *memSharkd) loadCount(shard string) int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.loads[shard]
-}
 
 // --- harness ---
 
 // newServer 装配测试服务并起 httptest。
-func newServer(t *testing.T, mutate func(*Config)) (*Server, *httptest.Server, string, *memSharkd) {
+func newServer(t *testing.T, mutate func(*Config)) (*Server, *httptest.Server, string, *testutil.Sharkd) {
 	t.Helper()
-	sock := startFakeSharkd(t)
-	cfg := Config{SpoolDir: t.TempDir(), SharkdSock: sock.ln.Addr().String(), Log: discardLog()}
+	sock := testutil.StartSharkd(t) // 简化模型（每字节一帧）：帧越界/增长重 load 模拟
+	cfg := Config{SpoolDir: t.TempDir(), SharkdSock: sock.Addr(), Log: discardLog()}
 	if mutate != nil {
 		mutate(&cfg)
 	}
@@ -205,14 +44,6 @@ func newServer(t *testing.T, mutate func(*Config)) (*Server, *httptest.Server, s
 // discardLog 静默 logger。
 func discardLog() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
-
-// writeShard 写分片并指定 mtime（规避文件系统时间戳精度）。
-func writeShard(t *testing.T, dir, name string, mtime time.Time, content []byte) {
-	t.Helper()
-	p := filepath.Join(dir, name)
-	require.NoError(t, os.WriteFile(p, content, 0o644))
-	require.NoError(t, os.Chtimes(p, mtime, mtime))
 }
 
 // getJSON GET 并解析 JSON 应答。
@@ -252,15 +83,6 @@ func dialWS(t *testing.T, ts *httptest.Server, header http.Header, extra ...stri
 	return ws, err
 }
 
-// readFrame 带超时读一条 WS text 帧。
-func readFrame(t *testing.T, ws *websocket.Conn) string {
-	t.Helper()
-	require.NoError(t, ws.SetReadDeadline(time.Now().Add(5*time.Second)))
-	_, data, err := ws.ReadMessage()
-	require.NoError(t, err)
-	return string(data)
-}
-
 // subscribe 建流并断言成功。
 func subscribe(t *testing.T, ts *httptest.Server, handle string) map[string]any {
 	t.Helper()
@@ -285,13 +107,13 @@ func TestStatus(t *testing.T) {
 
 	t.Run("分片按mtime降序同mtime名字降序", func(t *testing.T) {
 		_, ts, spoolDir, _ := newServer(t, nil)
-		writeShard(t, spoolDir, "b.pcapng", base, []byte("1234"))
-		writeShard(t, spoolDir, "a.pcapng", base.Add(2*time.Minute), []byte("12"))
-		writeShard(t, spoolDir, "c.pcapng", base.Add(time.Minute), []byte("123"))
-		writeShard(t, spoolDir, "noise.txt", base.Add(3*time.Minute), []byte("忽略"))
+		testutil.WriteShard(t, spoolDir, "b.pcapng", base, []byte("1234"))
+		testutil.WriteShard(t, spoolDir, "a.pcapng", base.Add(2*time.Minute), []byte("12"))
+		testutil.WriteShard(t, spoolDir, "c.pcapng", base.Add(time.Minute), []byte("123"))
+		testutil.WriteShard(t, spoolDir, "noise.txt", base.Add(3*time.Minute), []byte("忽略"))
 		require.NoError(t, os.Mkdir(filepath.Join(spoolDir, "sub"), 0o755))
-		writeShard(t, spoolDir, "t_a.pcapng", base, []byte("x"))
-		writeShard(t, spoolDir, "t_b.pcapng", base, []byte("x"))
+		testutil.WriteShard(t, spoolDir, "t_a.pcapng", base, []byte("x"))
+		testutil.WriteShard(t, spoolDir, "t_b.pcapng", base, []byte("x"))
 		_, body := getJSON(t, ts, "/api/status")
 		require.Equal(t, true, body["connected"])
 		var names []string
@@ -316,9 +138,9 @@ func TestDownload(t *testing.T) {
 
 	t.Run("多分片按mtime升序拼接", func(t *testing.T) {
 		_, ts, spoolDir, _ := newServer(t, nil)
-		writeShard(t, spoolDir, "net_00002.pcapng", base.Add(time.Minute), []byte("BBB"))
-		writeShard(t, spoolDir, "net_00001.pcapng", base, []byte("AAA"))
-		writeShard(t, spoolDir, "net_00003.pcapng", base.Add(2*time.Minute), []byte("CCC"))
+		testutil.WriteShard(t, spoolDir, "net_00002.pcapng", base.Add(time.Minute), []byte("BBB"))
+		testutil.WriteShard(t, spoolDir, "net_00001.pcapng", base, []byte("AAA"))
+		testutil.WriteShard(t, spoolDir, "net_00003.pcapng", base.Add(2*time.Minute), []byte("CCC"))
 		resp, err := ts.Client().Get(ts.URL + "/api/download")
 		require.NoError(t, err)
 		defer func() { _ = resp.Body.Close() }()
@@ -340,8 +162,8 @@ func TestDownload(t *testing.T) {
 
 	t.Run("轮换中文件消失被跳过", func(t *testing.T) {
 		_, ts, spoolDir, _ := newServer(t, nil)
-		writeShard(t, spoolDir, "keep.pcapng", base, []byte("KEEP"))
-		writeShard(t, spoolDir, "gone.pcapng", base.Add(time.Minute), []byte("GONE"))
+		testutil.WriteShard(t, spoolDir, "keep.pcapng", base, []byte("KEEP"))
+		testutil.WriteShard(t, spoolDir, "gone.pcapng", base.Add(time.Minute), []byte("GONE"))
 		require.NoError(t, os.Remove(filepath.Join(spoolDir, "gone.pcapng"))) // 打开后打开前被删：清单已含、打开失败
 		resp, err := ts.Client().Get(ts.URL + "/api/download")
 		require.NoError(t, err)
@@ -378,7 +200,7 @@ func TestSubscribe(t *testing.T) {
 			subscribe(t, ts, fmt.Sprintf("st-%d", i))
 			ws, err := dialWS(t, ts, nil, fmt.Sprintf("handle=st-%d", i))
 			require.NoError(t, err)
-			readFrame(t, ws) // hello
+			testutil.ReadFrame(t, ws) // hello
 		}
 		code, _ := postJSON(t, ts, "/api/subscribe", `{"handle":"st-overflow"}`)
 		require.Equal(t, http.StatusTooManyRequests, code)
@@ -421,22 +243,22 @@ func TestFrame(t *testing.T) {
 
 	t.Run("当前分片也走缓存实例且只load一次", func(t *testing.T) {
 		_, ts, spoolDir, sock := newServer(t, nil)
-		writeShard(t, spoolDir, "live.pcapng", base, make([]byte, 32))
+		testutil.WriteShard(t, spoolDir, "live.pcapng", base, make([]byte, 32))
 		// WS 接入（建流并解锁 worker 追帧：无连接会话冻结不 load）
 		ws, err := dialWS(t, ts, nil, "handle=st-live")
 		require.NoError(t, err)
-		require.Equal(t, `{"type":"hello","mode":"live"}`, readFrame(t, ws))
+		require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 		// 实例就绪：轮询 subscribe 应答 shard 字段（worker load 成功后非空）
 		require.Eventually(t, func() bool {
 			_, body := postJSON(t, ts, "/api/subscribe", `{"handle":"st-live"}`)
 			return body["shard"] == "live.pcapng"
 		}, 10*time.Second, 50*time.Millisecond, "实时实例未就绪")
-		before := sock.loadCount("live.pcapng")
+		before := sock.LoadCount("live.pcapng")
 		code, body := getJSON(t, ts, "/api/frame?handle=st-live&shard=live.pcapng&num=7&proto=true")
 		require.Equal(t, http.StatusOK, code)
 		require.Equal(t, float64(7), body["num"])
 		require.Equal(t, "live.pcapng", body["loaded"])
-		require.Equal(t, before+1, sock.loadCount("live.pcapng")) // 缓存实例 load 恰一次
+		require.Equal(t, before+1, sock.LoadCount("live.pcapng")) // 缓存实例 load 恰一次
 	})
 
 	t.Run("历史分片走缓存实例且LRU", func(t *testing.T) {
@@ -446,7 +268,7 @@ func TestFrame(t *testing.T) {
 		// spool 为空时会话无分片，shard 显式给出即路由缓存实例）
 		for i := 0; i < 13; i++ {
 			name := fmt.Sprintf("hist_%02d.pcapng", i)
-			writeShard(t, spoolDir, name, base.Add(time.Duration(i)*time.Minute), make([]byte, 32))
+			testutil.WriteShard(t, spoolDir, name, base.Add(time.Duration(i)*time.Minute), make([]byte, 32))
 		}
 		// 逐片查一次：13 次 load（容量 12，首个被淘汰）
 		for i := 0; i < 13; i++ {
@@ -454,18 +276,18 @@ func TestFrame(t *testing.T) {
 			require.Equal(t, http.StatusOK, code, "帧查询失败: %v", body)
 			require.Equal(t, fmt.Sprintf("hist_%02d.pcapng", i), body["loaded"])
 		}
-		require.Equal(t, 1, sock.loadCount("hist_00.pcapng"))
-		require.Equal(t, 1, sock.loadCount("hist_01.pcapng"))
+		require.Equal(t, 1, sock.LoadCount("hist_00.pcapng"))
+		require.Equal(t, 1, sock.LoadCount("hist_01.pcapng"))
 		// hist_00 已被 LRU 淘汰：再查重 load
 		code, _ := getJSON(t, ts, "/api/frame?handle=st-h&shard=hist_00.pcapng&num=0")
 		require.Equal(t, http.StatusOK, code)
-		require.Equal(t, 2, sock.loadCount("hist_00.pcapng"))
+		require.Equal(t, 2, sock.LoadCount("hist_00.pcapng"))
 		// hist_12 仍在窗内：命中不重复 load
-		require.Equal(t, 1, sock.loadCount("hist_12.pcapng"))
+		require.Equal(t, 1, sock.LoadCount("hist_12.pcapng"))
 		// LRU 命中提位后再查仍不重 load
 		_, _ = getJSON(t, ts, "/api/frame?handle=st-h&shard=hist_05.pcapng&num=5")
 		_, _ = getJSON(t, ts, "/api/frame?handle=st-h&shard=hist_05.pcapng&num=5")
-		require.Equal(t, 1, sock.loadCount("hist_05.pcapng"))
+		require.Equal(t, 1, sock.LoadCount("hist_05.pcapng"))
 	})
 
 	t.Run("历史分片不存在404", func(t *testing.T) {
@@ -578,14 +400,14 @@ func TestWS(t *testing.T) {
 		host := strings.TrimPrefix(ts.URL, "http://")
 		ws, err := dialWS(t, ts, http.Header{"Origin": {"http://" + host}}, "handle=st-ws")
 		require.NoError(t, err)
-		require.Equal(t, `{"type":"hello","mode":"live"}`, readFrame(t, ws))
+		require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	})
 
 	t.Run("无Origin非浏览器放行", func(t *testing.T) {
 		_, ts, _, _ := newServer(t, nil)
 		ws, err := dialWS(t, ts, nil, "handle=st-ws2")
 		require.NoError(t, err)
-		require.Equal(t, `{"type":"hello","mode":"live"}`, readFrame(t, ws))
+		require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	})
 
 	t.Run("建流上限发error帧后关闭", func(t *testing.T) {
@@ -595,11 +417,11 @@ func TestWS(t *testing.T) {
 			subscribe(t, ts, h)
 			ws, err := dialWS(t, ts, nil, "handle="+h)
 			require.NoError(t, err)
-			readFrame(t, ws) // hello
+			testutil.ReadFrame(t, ws) // hello
 		}
 		ws, err := dialWS(t, ts, nil, "handle=st-overflow")
 		require.NoError(t, err)
-		frame := readFrame(t, ws)
+		frame := testutil.ReadFrame(t, ws)
 		var m map[string]any
 		require.NoError(t, json.Unmarshal([]byte(frame), &m))
 		require.Equal(t, "error", m["type"])

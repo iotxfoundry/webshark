@@ -4,6 +4,7 @@ package spool
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"time"
 )
@@ -63,5 +64,12 @@ func Ring(dir string, n int) []Shard {
 	if len(files) > n {
 		return files[:n]
 	}
+	return files
+}
+
+// RingAsc 返回环窗清单 mtime 升序（拼接与补推走查的时间序）。
+func RingAsc(dir string, n int) []Shard {
+	files := Ring(dir, n)
+	slices.Reverse(files)
 	return files
 }

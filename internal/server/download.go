@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"time"
 
 	"github.com/iotxfoundry/webshark/internal/spool"
@@ -19,8 +18,7 @@ import (
 
 // handleDownload GET /api/download。
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
-	files := spool.Ring(s.cfg.SpoolDir, s.cfg.RingSize) // 环窗，mtime 降序 → 反转为时间升序（拼接后报文时间序才正确）
-	slices.Reverse(files)
+	files := spool.RingAsc(s.cfg.SpoolDir, s.cfg.RingSize) // 环窗，mtime 升序（拼接后报文时间序才正确）
 	if len(files) == 0 {
 		writeErr(w, http.StatusNotFound, http.StatusNotFound, "spool 无 pcapng 分片可导出")
 		return

@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/iotxfoundry/webshark/internal/testutil"
 )
 
 // TestDownloadUnreadableShard503 分片均不可读（如 chmod 000）时 download 应
@@ -21,7 +23,7 @@ func TestDownloadUnreadableShard503(t *testing.T) {
 		t.Skip("root 忽略文件权限")
 	}
 	_, ts, spoolDir, _ := newServer(t, nil)
-	writeShard(t, spoolDir, "a.pcapng", time.Now(), []byte("hello-pcapng"))
+	testutil.WriteShard(t, spoolDir, "a.pcapng", time.Now(), []byte("hello-pcapng"))
 	require.NoError(t, os.Chmod(spoolDir+"/a.pcapng", 0o000))
 
 	resp, err := ts.Client().Get(ts.URL + "/api/download")
@@ -42,7 +44,7 @@ func TestRingWindowStatusAndDownload(t *testing.T) {
 		content := fmt.Appendf(nil, "shard-%02d-content", i)
 		name := fmt.Sprintf("s%02d.pcapng", i)
 		contents[name] = content
-		writeShard(t, spoolDir, name, base.Add(time.Duration(i)*time.Minute), content)
+		testutil.WriteShard(t, spoolDir, name, base.Add(time.Duration(i)*time.Minute), content)
 	}
 
 	// status：环窗 16 片

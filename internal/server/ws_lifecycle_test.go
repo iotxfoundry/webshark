@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/iotxfoundry/webshark/internal/testutil"
 )
 
 // TestWSHelloAfterFullQueue 锁定重连不死锁：出站队列已满 256 帧时接入，hello
@@ -45,7 +47,7 @@ func TestWSDeadConnReclaimed(t *testing.T) {
 
 	ws, err := dialWS(t, ts, nil, "handle=h-dead")
 	require.NoError(t, err)
-	_ = readFrame(t, ws) // 消费 hello（此后不读不 pong）
+	_ = testutil.ReadFrame(t, ws) // 消费 hello（此后不读不 pong）
 	time.Sleep(700 * time.Millisecond)
 	require.NoError(t, ws.SetReadDeadline(time.Now().Add(300*time.Millisecond)))
 	_, _, err = ws.ReadMessage()

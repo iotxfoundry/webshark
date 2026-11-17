@@ -36,7 +36,7 @@ func TestCallAfterShutdown(t *testing.T) {
 
 	sess.shutdown()
 
-	_, err = sess.Call("info", nil)
+	_, err = sess.CallCtx(sess.ctx, "info", nil)
 	require.Error(t, err, "shutdown 后 Call 应返回错误")
 
 	time.Sleep(100 * time.Millisecond)

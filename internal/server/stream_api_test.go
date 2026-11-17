@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/iotxfoundry/webshark/internal/testutil"
 )
 
 // TestFrameAlwaysUsesCache 请求 shard == 会话当前分片时仍走分片缓存实例：
@@ -20,28 +22,28 @@ import (
 func TestFrameAlwaysUsesCache(t *testing.T) {
 	base := time.Unix(1700000000, 0)
 	_, ts, spoolDir, sock := newServer(t, nil)
-	writeShard(t, spoolDir, "live.pcapng", base, make([]byte, 32))
+	testutil.WriteShard(t, spoolDir, "live.pcapng", base, make([]byte, 32))
 	// WS 接入解锁 worker 追帧，等实时实例 load live.pcapng
 	ws, err := dialWS(t, ts, nil, "handle=st-cc")
 	require.NoError(t, err)
-	readFrame(t, ws) // hello
+	testutil.ReadFrame(t, ws) // hello
 	require.Eventually(t, func() bool {
 		_, body := postJSON(t, ts, "/api/subscribe", `{"handle":"st-cc"}`)
 		return body["shard"] == "live.pcapng"
 	}, 10*time.Second, 50*time.Millisecond, "实时实例未就绪")
 
-	before := sock.loadCount("live.pcapng") // worker 冷启动 load 过一次
+	before := sock.LoadCount("live.pcapng") // worker 冷启动 load 过一次
 	code, body := getJSON(t, ts, "/api/frame?handle=st-cc&shard=live.pcapng&num=7&proto=true")
 	require.Equal(t, http.StatusOK, code, "帧查询失败: %v", body)
 	require.Equal(t, float64(7), body["num"])
 	require.Equal(t, "live.pcapng", body["loaded"])
-	require.Equal(t, before+1, sock.loadCount("live.pcapng"), "同当前分片也应经缓存实例 load 恰一次")
+	require.Equal(t, before+1, sock.LoadCount("live.pcapng"), "同当前分片也应经缓存实例 load 恰一次")
 
 	// 缺省 shard（取 cur）：LRU 命中，缓存实例不重 load
 	code, body = getJSON(t, ts, "/api/frame?handle=st-cc&num=8")
 	require.Equal(t, http.StatusOK, code, "帧查询失败: %v", body)
 	require.Equal(t, float64(8), body["num"])
-	require.Equal(t, before+1, sock.loadCount("live.pcapng"), "LRU 驻留不应重 load")
+	require.Equal(t, before+1, sock.LoadCount("live.pcapng"), "LRU 驻留不应重 load")
 }
 
 // TestTapReportsLoadedShard /api/tap 响应在 sharkd result 同级补注 shard 键
@@ -49,10 +51,10 @@ func TestFrameAlwaysUsesCache(t *testing.T) {
 func TestTapReportsLoadedShard(t *testing.T) {
 	base := time.Unix(1700000000, 0)
 	_, ts, spoolDir, _ := newServer(t, nil)
-	writeShard(t, spoolDir, "cur.pcapng", base, []byte("pcap"))
+	testutil.WriteShard(t, spoolDir, "cur.pcapng", base, []byte("pcap"))
 	ws, err := dialWS(t, ts, nil, "handle=st-tap")
 	require.NoError(t, err)
-	readFrame(t, ws) // hello
+	testutil.ReadFrame(t, ws) // hello
 	require.Eventually(t, func() bool {
 		_, body := postJSON(t, ts, "/api/subscribe", `{"handle":"st-tap"}`)
 		return body["shard"] == "cur.pcapng"
@@ -89,7 +91,7 @@ func TestSubscribeAfterClose503(t *testing.T) {
 // 写出字节数误判为"均不可读"。
 func TestDownloadEmptyShard200(t *testing.T) {
 	_, ts, spoolDir, _ := newServer(t, nil)
-	writeShard(t, spoolDir, "empty.pcapng", time.Unix(1700000000, 0), nil)
+	testutil.WriteShard(t, spoolDir, "empty.pcapng", time.Unix(1700000000, 0), nil)
 	resp, err := ts.Client().Get(ts.URL + "/api/download")
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
@@ -117,7 +119,7 @@ func TestSubscribeColdFlag(t *testing.T) {
 func TestTapDetailsCapped(t *testing.T) {
 	t.Run("超限截断为前5000条并报truncated", func(t *testing.T) {
 		_, ts, _, sock := newServer(t, nil)
-		sock.tapDetails = 6000
+		sock.TapDetails = 6000
 		subscribe(t, ts, "st-tap-cap")
 		code, body := postJSON(t, ts, "/api/tap", `{"handle":"st-tap-cap","tap0":"expert"}`)
 		require.Equal(t, http.StatusOK, code)
@@ -130,7 +132,7 @@ func TestTapDetailsCapped(t *testing.T) {
 
 	t.Run("未截断truncated为0且明细全保留", func(t *testing.T) {
 		_, ts, _, sock := newServer(t, nil)
-		sock.tapDetails = 2
+		sock.TapDetails = 2
 		subscribe(t, ts, "st-tap-small")
 		code, body := postJSON(t, ts, "/api/tap", `{"handle":"st-tap-small","tap0":"expert"}`)
 		require.Equal(t, http.StatusOK, code)
@@ -146,10 +148,10 @@ func TestTapDetailsCapped(t *testing.T) {
 // 而非透传 sharkd 英文原文让使用者无从判断。
 func TestFrameOutOfRangeShardContentReplaced(t *testing.T) {
 	_, ts, spoolDir, _ := newServer(t, nil)
-	writeShard(t, spoolDir, "live.pcapng", time.Unix(1700000000, 0), make([]byte, 32))
+	testutil.WriteShard(t, spoolDir, "live.pcapng", time.Unix(1700000000, 0), make([]byte, 32))
 	ws, err := dialWS(t, ts, nil, "handle=st-oob")
 	require.NoError(t, err)
-	readFrame(t, ws) // hello
+	testutil.ReadFrame(t, ws) // hello
 	require.Eventually(t, func() bool {
 		_, body := postJSON(t, ts, "/api/subscribe", `{"handle":"st-oob"}`)
 		return body["shard"] == "live.pcapng"
@@ -167,13 +169,13 @@ func TestFrameOutOfRangeShardContentReplaced(t *testing.T) {
 func TestFrameCacheReloadsGrownShard(t *testing.T) {
 	_, ts, spoolDir, _ := newServer(t, nil)
 	name := "grow.pcapng"
-	writeShard(t, spoolDir, name, time.Unix(1700000000, 0), make([]byte, 100)) // 100 帧
+	testutil.WriteShard(t, spoolDir, name, time.Unix(1700000000, 0), make([]byte, 100)) // 100 帧
 	subscribe(t, ts, "st-grow")
 	code, body := getJSON(t, ts, fmt.Sprintf("/api/frame?handle=st-grow&shard=%s&num=70", name))
 	require.Equal(t, http.StatusOK, code, "初次查询（快照 100 帧）应成功: %v", body)
 
 	// 分片追加到 200 帧（同名覆盖写，模拟 dumpcap 持续落盘）
-	writeShard(t, spoolDir, name, time.Unix(1700000000, 0), make([]byte, 200))
+	testutil.WriteShard(t, spoolDir, name, time.Unix(1700000000, 0), make([]byte, 200))
 	code, body = getJSON(t, ts, fmt.Sprintf("/api/frame?handle=st-grow&shard=%s&num=150", name))
 	require.Equal(t, http.StatusOK, code, "增长后查询应触发重 load 而非命中旧快照: %v", body)
 	require.Equal(t, float64(150), body["num"])
@@ -185,20 +187,13 @@ func TestFrameCacheReloadsGrownShard(t *testing.T) {
 func TestStatusProbeReusesConnection(t *testing.T) {
 	base := time.Unix(1700000000, 0)
 	_, ts, spoolDir, sock := newServer(t, nil)
-	writeShard(t, spoolDir, "live.pcapng", base, make([]byte, 32))
+	testutil.WriteShard(t, spoolDir, "live.pcapng", base, make([]byte, 32))
 	for i := 0; i < 3; i++ {
 		code, body := getJSON(t, ts, "/api/status")
 		require.Equal(t, http.StatusOK, code)
 		require.Equal(t, true, body["connected"], "假 sharkd 在听，应可达")
 	}
-	require.Equal(t, 1, sock.conns, "多次 status 应复用同一条 sharkd 连接（每次连接 fork 一子进程）")
-}
-
-// connCount 统计 memSharkd 已接受的连接数（每次拨号一条，sharkd 每连接 fork
-// 一个子进程——连接数即 fork 数）。
-func connCount(t *testing.T, shard string) int {
-	t.Helper()
-	return 0
+	require.Equal(t, 1, sock.Conns(), "多次 status 应复用同一条 sharkd 连接（每次连接 fork 一子进程）")
 }
 
 // TestStaticFontContentType 锁定字体静态资源可用性：Go 内建 mime 表不含

@@ -8,23 +8,18 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-)
 
-func writeFile(t *testing.T, dir, name string, data []byte, mtime time.Time) {
-	t.Helper()
-	p := filepath.Join(dir, name)
-	require.NoError(t, os.WriteFile(p, data, 0o644))
-	require.NoError(t, os.Chtimes(p, mtime, mtime))
-}
+	"github.com/iotxfoundry/webshark/internal/testutil"
+)
 
 func TestListOrdering(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Now().Truncate(time.Second)
 	// 同 mtime：名字降序（c 在 b 前）
-	writeFile(t, dir, "b.pcapng", []byte("bb"), base)
-	writeFile(t, dir, "c.pcapng", []byte("c"), base)
+	testutil.WriteShard(t, dir, "b.pcapng", base, []byte("bb"))
+	testutil.WriteShard(t, dir, "c.pcapng", base, []byte("c"))
 	// 更新 mtime：排最前
-	writeFile(t, dir, "a.pcapng", []byte("aaa"), base.Add(time.Minute))
+	testutil.WriteShard(t, dir, "a.pcapng", base.Add(time.Minute), []byte("aaa"))
 
 	got := List(dir)
 	require.Len(t, got, 3)
@@ -37,9 +32,9 @@ func TestListOrdering(t *testing.T) {
 func TestListIgnoresNonPcapngAndDirs(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Now()
-	writeFile(t, dir, "ok.pcapng", []byte("x"), base)
-	writeFile(t, dir, "skip.txt", []byte("x"), base)
-	writeFile(t, dir, "skip.pcapng.tmp", []byte("x"), base)
+	testutil.WriteShard(t, dir, "ok.pcapng", base, []byte("x"))
+	testutil.WriteShard(t, dir, "skip.txt", base, []byte("x"))
+	testutil.WriteShard(t, dir, "skip.pcapng.tmp", base, []byte("x"))
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "sub.pcapng"), 0o755))
 
 	got := List(dir)
@@ -57,8 +52,8 @@ func TestLatest(t *testing.T) {
 	dir := t.TempDir()
 	require.Equal(t, "", Latest(dir))
 	base := time.Now()
-	writeFile(t, dir, "old.pcapng", []byte("x"), base)
-	writeFile(t, dir, "new.pcapng", []byte("x"), base.Add(time.Second))
+	testutil.WriteShard(t, dir, "old.pcapng", base, []byte("x"))
+	testutil.WriteShard(t, dir, "new.pcapng", base.Add(time.Second), []byte("x"))
 	require.Equal(t, "new.pcapng", Latest(dir))
 }
 
@@ -67,7 +62,7 @@ func TestRing(t *testing.T) {
 	base := time.Now()
 	for i := 0; i < 20; i++ {
 		name := fmt.Sprintf("%02d.pcapng", 19-i) // 名字大 = mtime 新
-		writeFile(t, dir, name, []byte("x"), base.Add(time.Duration(i)*time.Second))
+		testutil.WriteShard(t, dir, name, base.Add(time.Duration(i)*time.Second), []byte("x"))
 	}
 	ring := Ring(dir, 5)
 	require.Len(t, ring, 5)

@@ -158,8 +158,8 @@ func (s *Session) Shard() string {
 	return s.curShard
 }
 
-// Call 走该流专属实例（懒拨号；与 worker 追帧共用，客户端内串行）。
-// 超时取 sharkd 客户端默认值（10s）；sharkd.Error 原样返回。
+// Call 走该流专属实例（会话 ctx：会话关闭才取消在途请求；HTTP 客户端断开
+// 不中断、不丢弃健康连接——tap/follow 等透传路由依赖此语义）。
 func (s *Session) Call(method string, params any) (json.RawMessage, error) {
 	return s.CallCtx(s.ctx, method, params)
 }
@@ -172,8 +172,9 @@ func (s *Session) CallTimeout(method string, params any, timeout time.Duration) 
 	return s.CallCtx(ctx, method, params)
 }
 
-// CallCtx 以指定 ctx 调用（懒拨号；与 worker 追帧共用，客户端内串行）。
-// sharkd.Error 原样返回；会话关闭即取消在途请求（连接随之丢弃）。
+// CallCtx 走该流专属实例（懒拨号；与 worker 追帧共用，客户端内串行）。ctx 不
+// 设超时即取 sharkd 客户端默认值（10s）；sharkd.Error 原样返回；会话关闭即
+// 取消在途请求（连接随之丢弃）。
 func (s *Session) CallCtx(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	s.sharkMu.Lock()
 	defer s.sharkMu.Unlock()

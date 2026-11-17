@@ -4,164 +4,30 @@
 package stream
 
 import (
-	"bufio"
 	"encoding/json"
-	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
+
+	"github.com/iotxfoundry/webshark/internal/testutil"
 )
 
-// memSharkd 模拟 sharkd 会话语义：load 切换当前文件（文件不存在即 envelope
-// error，与真实 sharkd 打不开文件同形态）；frames 按 skip/limit 在**会话快照**
-// 行集上切片（真 sharkd load=内存快照，load 后 setRows 增长不可见直到重新
-// load）；check 校验 filter（含 "bad" 即语法错）；frame 回单帧详情。skip≤0 回
-// -32600（真 sharkd UINTEGER 约束：skip 须 >0，省略=从第 1 行）。
-type memSharkd struct {
-	ln     net.Listener
-	mu     sync.Mutex
-	rows   map[string]int // 分片 basename → 帧行数（可运行期增长，模拟落盘）
-	loaded string         // 诊断：最近一次 load 的分片
-	recv   []string       // 收到的请求行（上游断言 skip 游标/filter 透传/load 次数）
-
-	slowFrames time.Duration // frames 响应延迟（轻查询并行不互扰验证用）
-	failLoads  atomic.Int32  // 测试用：注入前 N 次 load 失败（0=不失败），验证退避
-}
-
-func startMemSharkd(t *testing.T) *memSharkd {
+// startMemSharkd 行数表模型假 sharkd（load=会话内存快照：快照行数取 SetRows
+// 行数表，文件字节数无关——load 后行集增长对本会话不可见直到重 load，这是
+// 追帧 reload 链路的关键断言点）。
+func startMemSharkd(t *testing.T) *testutil.Sharkd {
 	t.Helper()
-	ln, err := net.Listen("unix", filepath.Join(t.TempDir(), "sharkd.sock"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = ln.Close() })
-	m := &memSharkd{ln: ln, rows: map[string]int{}}
-	go func() {
-		for {
-			c, aerr := ln.Accept()
-			if aerr != nil {
-				return
-			}
-			go m.serve(c)
-		}
-	}()
+	m := testutil.StartSharkd(t)
+	m.RowsByTable = true
 	return m
-}
-
-// setRows 运行期改写分片行数（增长/新片）。
-func (m *memSharkd) setRows(shard string, n int) {
-	m.mu.Lock()
-	m.rows[shard] = n
-	m.mu.Unlock()
-}
-
-// written 已收到请求行快照。
-func (m *memSharkd) written() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]string(nil), m.recv...)
-}
-
-type memParams struct {
-	File   string `json:"file"`
-	Skip   int    `json:"skip"`
-	Limit  int    `json:"limit"`
-	Filter string `json:"filter"`
-	Frame  int    `json:"frame"`
-}
-
-// serve 单会话：逐行解析 JSON-RPC 请求，按 sharkd 语义回响应（恒单行）。snap
-// 为本会话 load 时的行数快照。
-func (m *memSharkd) serve(c net.Conn) {
-	defer func() { _ = c.Close() }()
-	sc := bufio.NewScanner(c)
-	sc.Buffer(make([]byte, 64<<10), 32<<20)
-	snap := 0
-	for sc.Scan() {
-		var req struct {
-			ID     int             `json:"id"`
-			Method string          `json:"method"`
-			Params json.RawMessage `json:"params"`
-		}
-		if json.Unmarshal(sc.Bytes(), &req) != nil {
-			continue
-		}
-		if req.Method == "frames" { // 慢拉延迟在锁外睡：不阻塞其他连接
-			m.mu.Lock()
-			slow := m.slowFrames
-			m.mu.Unlock()
-			if slow > 0 {
-				time.Sleep(slow)
-			}
-		}
-		m.mu.Lock()
-		m.recv = append(m.recv, sc.Text())
-		var p memParams
-		_ = json.Unmarshal(req.Params, &p)
-		resp := m.dispatch(req.ID, req.Method, p, req.Params, &snap)
-		m.mu.Unlock()
-		_, _ = c.Write(append(resp, '\n'))
-	}
-	_ = sc.Err() // 测试 harness：客户端断开即 EOF，读错无断言意义
-}
-
-// dispatch 响应生成（持 mu 调用）。
-func (m *memSharkd) dispatch(id int, method string, p memParams, rawParams json.RawMessage, snap *int) []byte {
-	switch method {
-	case "load":
-		if n := m.failLoads.Add(-1); n >= 0 { // 配额未尽：注入 load 失败（模拟慢盘/分片被覆盖）
-			return fmt.Appendf(nil,
-				`{"jsonrpc":"2.0","id":%d,"error":{"code":-2,"message":"open %s: no such file"}}`, id, p.File)
-		}
-		if _, err := os.Stat(p.File); err != nil {
-			return fmt.Appendf(nil,
-				`{"jsonrpc":"2.0","id":%d,"error":{"code":-2,"message":"open %s: no such file"}}`, id, p.File)
-		}
-		m.loaded = filepath.Base(p.File)
-		*snap = m.rows[m.loaded]
-		return fmt.Appendf(nil, `{"jsonrpc":"2.0","id":%d,"result":{"err":0}}`, id)
-	case "frames":
-		var rp map[string]any
-		if json.Unmarshal(rawParams, &rp) == nil {
-			if v, ok := rp["skip"]; ok {
-				if f, _ := v.(float64); f <= 0 {
-					return fmt.Appendf(nil,
-						`{"jsonrpc":"2.0","id":%d,"error":{"code":-32600,"message":"The value for skip must be a positive integer"}}`, id)
-				}
-			}
-		}
-		total := *snap // 会话快照：load 后行集增长不可见直到重 load
-		rows := make([]string, 0, p.Limit)
-		for i := p.Skip; i < total && i < p.Skip+p.Limit; i++ {
-			rows = append(rows, fmt.Sprintf(`{"num":%d,"time":"1700000000.%06d"}`, i+1, i))
-		}
-		return fmt.Appendf(nil, `{"jsonrpc":"2.0","id":%d,"result":[%s]}`, id, strings.Join(rows, ","))
-	case "check":
-		if strings.Contains(p.Filter, "bad") {
-			return fmt.Appendf(nil,
-				`{"jsonrpc":"2.0","id":%d,"error":{"code":-1,"message":"filter syntax error"}}`, id)
-		}
-		return fmt.Appendf(nil, `{"jsonrpc":"2.0","id":%d,"result":{"err":0}}`, id)
-	case "frame":
-		return fmt.Appendf(nil,
-			`{"jsonrpc":"2.0","id":%d,"result":{"err":0,"num":%d,"tree":"detail-%d"}}`, id, p.Frame, p.Frame)
-	}
-	return fmt.Appendf(nil, `{"jsonrpc":"2.0","id":%d,"error":{"code":-32601,"message":"no such method"}}`, id)
-}
-
-// loaded 记录的当前 load 分片（诊断用）。
-func (m *memSharkd) currentLoaded() string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.loaded
 }
 
 // countLoadOf 统计请求行中对指定分片的 load 次数。
@@ -195,16 +61,8 @@ func newManager(t *testing.T, sock, spoolDir string) *Manager {
 	return m
 }
 
-// writeShard 在 spool 写分片并以 os.Chtimes 指定 mtime（规避文件系统时间戳精度）。
-func writeShard(t *testing.T, dir, name string, mtime time.Time, content []byte) {
-	t.Helper()
-	p := filepath.Join(dir, name)
-	require.NoError(t, os.WriteFile(p, content, 0o644))
-	require.NoError(t, os.Chtimes(p, mtime, mtime))
-}
-
 // appendShard 向分片追加字节（模拟落盘增长；load=内存快照语义下，增长可见须
-// 配合活动片 reload——测试用例随 append 调 setRows 增行）。
+// 配合活动片 reload——测试用例随 append 调 SetRows 增行）。
 func appendShard(t *testing.T, dir, name string, bytes int) {
 	t.Helper()
 	f, err := os.OpenFile(filepath.Join(dir, name), os.O_APPEND|os.O_WRONLY, 0o644)
@@ -214,18 +72,14 @@ func appendShard(t *testing.T, dir, name string, bytes int) {
 	require.NoError(t, f.Close())
 }
 
-// fakeWS 假 WS 连接对（net.Pipe）：Attach 侧消费，测试侧收发帧。
-type fakeWS struct {
-	c *websocket.Conn
-}
-
 // newFakeWS 建一对 WS 连接：测试侧 client + 会话侧 server（真 HTTP 升级握手；
 // server 端 handler 挂起保活，读写由 writerLoop/测试侧承担）。
 func newFakeWS(t *testing.T) (*websocket.Conn, *websocket.Conn) {
 	t.Helper()
 	srvCh := make(chan *websocket.Conn, 1)
+	up := websocket.Upgrader{ReadBufferSize: 4096, WriteBufferSize: 4096}
 	l := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ws, err := websocket.Upgrade(w, r, nil, 4096, 4096)
+		ws, err := up.Upgrade(w, r, nil)
 		if err != nil {
 			return
 		}
@@ -263,15 +117,6 @@ func readUntilType(t *testing.T, ws *websocket.Conn, typ string, timeout time.Du
 			return m
 		}
 	}
-}
-
-// readFrameString 带超时读一条 WS text 帧原文。
-func readFrameString(t *testing.T, ws *websocket.Conn) string {
-	t.Helper()
-	require.NoError(t, ws.SetReadDeadline(time.Now().Add(5*time.Second)))
-	_, data, err := ws.ReadMessage()
-	require.NoError(t, err)
-	return string(data)
 }
 
 // readNoFrame 断言时限内无更多帧。注意：gorilla 连接读超时后内部 readErr 固化，
@@ -334,7 +179,7 @@ func mustSession(t *testing.T, m *Manager, handle string) *Session {
 }
 
 // wsOf 会话当前持有的连接的**客户端侧对端**（writerLoop 写 server 端，测试读
-// client 端；dialSession/attachRaw 时登记映射）。
+// client 端；dialSession 时登记映射）。
 func wsOf(t *testing.T, s *Session) *websocket.Conn {
 	t.Helper()
 	s.wsMu.Lock()
@@ -359,26 +204,14 @@ var (
 	wsClient   = map[*websocket.Conn]*websocket.Conn{}
 )
 
-// attachRaw 直接 Attach 一条新 WS（不经 dialSession），回被顶替的旧连接
-// （由调用方断言非 nil / 关闭语义）。
-func attachRaw(t *testing.T, s *Session) *websocket.Conn {
+// dialSession 一条新 WS 接入会话并启动写循环，回 (客户端侧对端, 被顶替旧连接)。
+// takeover 顶替语义即关闭旧连接（重连接管）；false 保留旧连接回给调用方，
+// 供接管/顶替语义断言。
+func dialSession(t *testing.T, s *Session, takeover bool) (*websocket.Conn, *websocket.Conn) {
 	t.Helper()
 	test, srv := newFakeWS(t)
 	old := s.Attach(srv)
-	s.Enqueue(HelloFrame())
-	go writerLoop(s, srv)
-	wsClientMu.Lock()
-	wsClient[srv] = test
-	wsClientMu.Unlock()
-	t.Cleanup(func() { _ = test.Close() })
-	return old
-}
-
-// dialSession attach 一条新 WS 并启动写循环，回该连接的客户端侧对端。
-func dialSession(t *testing.T, s *Session) *websocket.Conn {
-	t.Helper()
-	test, srv := newFakeWS(t)
-	if old := s.Attach(srv); old != nil {
+	if takeover && old != nil {
 		_ = old.Close()
 	}
 	s.Enqueue(HelloFrame())
@@ -387,5 +220,5 @@ func dialSession(t *testing.T, s *Session) *websocket.Conn {
 	wsClient[srv] = test
 	wsClientMu.Unlock()
 	t.Cleanup(func() { _ = test.Close() })
-	return test
+	return test, old
 }

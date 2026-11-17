@@ -7,7 +7,6 @@ package stream
 import (
 	"errors"
 	"log/slog"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -141,9 +140,7 @@ func (m *Manager) latestShard() string { return spool.Latest(m.cfg.SpoolDir) }
 
 // ringWindowAsc 环窗分片 mtime 升序（补推/走查序）。
 func (m *Manager) ringWindowAsc() []spool.Shard {
-	shards := spool.Ring(m.cfg.SpoolDir, m.ringSize)
-	slices.Reverse(shards)
-	return shards
+	return spool.RingAsc(m.cfg.SpoolDir, m.ringSize)
 }
 
 // janitor 周期回收：无连接且宽限已过的会话销毁（cancel → worker 退订/关实例）。

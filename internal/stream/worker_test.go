@@ -15,6 +15,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
+
+	"github.com/iotxfoundry/webshark/internal/testutil"
 )
 
 // TestLiveInitialAndRotation 锁定初始全量对齐 + 活动分片增量 + 轮换增量：
@@ -24,16 +26,16 @@ import (
 func TestLiveInitialAndRotation(t *testing.T) {
 	spoolDir := t.TempDir()
 	base := time.Now()
-	writeShard(t, spoolDir, "s0.pcapng", base, []byte("pcap")) // 更早分片：不进冷启动
-	writeShard(t, spoolDir, "s1.pcapng", base.Add(time.Minute), []byte("pcap"))
+	testutil.WriteShard(t, spoolDir, "s0.pcapng", base, []byte("pcap")) // 更早分片：不进冷启动
+	testutil.WriteShard(t, spoolDir, "s1.pcapng", base.Add(time.Minute), []byte("pcap"))
 	m := startMemSharkd(t)
-	m.setRows("s0.pcapng", 2)
-	m.setRows("s1.pcapng", 2)
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
-	ws := dialSession(t, mustSession(t, mgr, "tk1"))
+	m.SetRows("s0.pcapng", 2)
+	m.SetRows("s1.pcapng", 2)
+	mgr := newManager(t, m.Addr(), spoolDir)
+	ws, _ := dialSession(t, mustSession(t, mgr, "tk1"), true)
 
 	// 握手确认 + 冷启动（仅最新片）：hello → rotated s1 → rows s1（行透传 + ref 复合键）
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws))
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	require.JSONEq(t, `{"type":"rotated","shard":"s1.pcapng"}`,
 		string(marshalFrame(t, readUntilType(t, ws, "rotated", 5*time.Second))))
 	rowsMsg := readUntilType(t, ws, "rows", 5*time.Second)
@@ -45,14 +47,14 @@ func TestLiveInitialAndRotation(t *testing.T) {
 
 	// 活动分片增长：游标增量推送，无 rotated
 	appendShard(t, spoolDir, "s1.pcapng", 64)
-	m.setRows("s1.pcapng", 3)
+	m.SetRows("s1.pcapng", 3)
 	rowsMsg = readUntilType(t, ws, "rows", 5*time.Second)
 	require.Equal(t, "s1.pcapng", rowsMsg["shard"])
 	require.Equal(t, []float64{3}, rowsNums(t, rowsMsg), "活动分片增量只含新行")
 
 	// 轮换：新分片落盘 → rotated（新片名）+ 新片全量行
-	writeShard(t, spoolDir, "s2.pcapng", base.Add(2*time.Minute), []byte("pcap"))
-	m.setRows("s2.pcapng", 2)
+	testutil.WriteShard(t, spoolDir, "s2.pcapng", base.Add(2*time.Minute), []byte("pcap"))
+	m.SetRows("s2.pcapng", 2)
 	require.JSONEq(t, `{"type":"rotated","shard":"s2.pcapng"}`,
 		string(marshalFrame(t, readUntilType(t, ws, "rotated", 5*time.Second))))
 	rowsMsg = readUntilType(t, ws, "rows", 5*time.Second)
@@ -60,9 +62,9 @@ func TestLiveInitialAndRotation(t *testing.T) {
 	require.Equal(t, []float64{1, 2}, rowsNums(t, rowsMsg))
 
 	// sharkd 侧：load 补全 spool 绝对路径（s1 与 s2）；更早的 s0 零 load（不回放历史）
-	recv := m.written()
+	recv := m.Written()
 	for _, name := range []string{"s1.pcapng", "s2.pcapng"} {
-		require.True(t, hasLoadOf(recv, name), "应收到 %s 的 load(绝对路径): %v", name, recv)
+		require.True(t, countLoadOf(recv, name) > 0, "应收到 %s 的 load(绝对路径): %v", name, recv)
 	}
 	require.Zero(t, countLoadOf(recv, "s0.pcapng"), "冷启动不回放历史片: %v", recv)
 	require.True(t, hasLine(recv, `"method":"frames"`), "应发出 frames 请求: %v", recv)
@@ -73,14 +75,14 @@ func TestLiveInitialAndRotation(t *testing.T) {
 // 冻结），同 handle 重连后从游标续推无重无漏。
 func TestLiveReconnectResume(t *testing.T) {
 	spoolDir := t.TempDir()
-	writeShard(t, spoolDir, "s1.pcapng", time.Now(), []byte("pcap"))
+	testutil.WriteShard(t, spoolDir, "s1.pcapng", time.Now(), []byte("pcap"))
 	m := startMemSharkd(t)
-	m.setRows("s1.pcapng", 4)
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
+	m.SetRows("s1.pcapng", 4)
+	mgr := newManager(t, m.Addr(), spoolDir)
 	sess := mustSession(t, mgr, "tk2")
 
-	ws1 := dialSession(t, sess)
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws1))
+	ws1, _ := dialSession(t, sess, true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws1))
 	rowsMsg := readUntilType(t, ws1, "rows", 5*time.Second)
 	require.Equal(t, []float64{1, 2, 3, 4}, rowsNums(t, rowsMsg)) // 初始全量对齐（单批）
 	srv1 := srvOf(t, sess)
@@ -88,11 +90,11 @@ func TestLiveReconnectResume(t *testing.T) {
 	sess.Detach(srv1)
 	_ = srv1.Close() // 服务端侧同步关闭（writerLoop 随 PopFor false 退出）
 	appendShard(t, spoolDir, "s1.pcapng", 96)
-	m.setRows("s1.pcapng", 6)          // 断开期间落盘增长
+	m.SetRows("s1.pcapng", 6)          // 断开期间落盘增长
 	time.Sleep(600 * time.Millisecond) // 断开窗口跨过拉取节拍
 
-	ws2 := dialSession(t, sess) // 同 handle 重连
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws2))
+	ws2, _ := dialSession(t, sess, true) // 同 handle 重连
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws2))
 	rowsMsg = readUntilType(t, ws2, "rows", 5*time.Second)
 	require.Equal(t, []float64{5, 6}, rowsNums(t, rowsMsg), "续推无重(不含1-4)无漏(补齐5,6)")
 }
@@ -105,9 +107,9 @@ func TestBackpressure(t *testing.T) {
 	base := time.Now()
 	m := startMemSharkd(t)
 	rowsPer := map[string]int{"s4.pcapng": 4000}
-	writeShard(t, spoolDir, "s4.pcapng", base.Add(time.Minute), []byte("p"))
-	m.setRows("s4.pcapng", rowsPer["s4.pcapng"])
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
+	testutil.WriteShard(t, spoolDir, "s4.pcapng", base.Add(time.Minute), []byte("p"))
+	m.SetRows("s4.pcapng", rowsPer["s4.pcapng"])
+	mgr := newManager(t, m.Addr(), spoolDir)
 
 	type stamped struct {
 		typ   string
@@ -117,8 +119,8 @@ func TestBackpressure(t *testing.T) {
 	var mu sync.Mutex
 	var recs []stamped
 	sess := mustSession(t, mgr, "tkb")
-	ws := dialSession(t, sess)
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws))
+	ws, _ := dialSession(t, sess, true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	go func() { // 慢消费：逐帧歇 20ms（≈50 批/s）
 		for {
 			if ws.SetReadDeadline(time.Now().Add(90*time.Second)) != nil {
@@ -195,18 +197,18 @@ func TestRingWindowAlignment(t *testing.T) {
 	m := startMemSharkd(t)
 	for i := 1; i <= 4; i++ { // 遗留代：昨日 mtime
 		name := fmt.Sprintf("net_old%02d.pcapng", i)
-		writeShard(t, spoolDir, name, base.Add(-24*time.Hour), []byte("old"))
-		m.setRows(name, 1)
+		testutil.WriteShard(t, spoolDir, name, base.Add(-24*time.Hour), []byte("old"))
+		m.SetRows(name, 1)
 	}
 	for i := 1; i <= 16; i++ { // 当代 16 片：mtime 升序
 		name := fmt.Sprintf("net_%04d.pcapng", i)
-		writeShard(t, spoolDir, name, base.Add(time.Duration(i)*time.Minute), []byte("cur"))
-		m.setRows(name, 1)
+		testutil.WriteShard(t, spoolDir, name, base.Add(time.Duration(i)*time.Minute), []byte("cur"))
+		m.SetRows(name, 1)
 	}
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
+	mgr := newManager(t, m.Addr(), spoolDir)
 	sess := mustSession(t, mgr, "tkr")
-	ws := dialSession(t, sess)
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws))
+	ws, _ := dialSession(t, sess, true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	require.Eventually(t, func() bool { // 实时实例就绪（当前分片=最新 mtime）
 		return sess.Shard() == "net_0016.pcapng"
 	}, 5*time.Second, 20*time.Millisecond)
@@ -228,7 +230,7 @@ func TestRingWindowAlignment(t *testing.T) {
 		return len(shards) == 1
 	}, 10*time.Second, 50*time.Millisecond)
 	require.Equal(t, map[string]bool{"net_0016.pcapng": true}, shards, "冷启动只推窗首最新片: %v", shards)
-	for _, ln := range m.written() {
+	for _, ln := range m.Written() {
 		if strings.Contains(ln, `"method":"load"`) {
 			require.Contains(t, ln, "net_0016.pcapng", "只 load 窗首最新片: %s", ln)
 		}
@@ -277,12 +279,12 @@ func TestEnqueueBackpressureAndShutdown(t *testing.T) {
 // 150ms + 冲刷 80ms）：新行须在 1.5s 内送达（load=内存快照，不 reload 增长永不可见）。
 func TestGrowthPullLatency(t *testing.T) {
 	spoolDir := t.TempDir()
-	writeShard(t, spoolDir, "s1.pcapng", time.Now(), []byte("pcap"))
+	testutil.WriteShard(t, spoolDir, "s1.pcapng", time.Now(), []byte("pcap"))
 	m := startMemSharkd(t)
-	m.setRows("s1.pcapng", 4)
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
-	ws := dialSession(t, mustSession(t, mgr, "tkg"))
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws))
+	m.SetRows("s1.pcapng", 4)
+	mgr := newManager(t, m.Addr(), spoolDir)
+	ws, _ := dialSession(t, mustSession(t, mgr, "tkg"), true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	require.Equal(t, []float64{1, 2, 3, 4}, rowsNums(t, readUntilType(t, ws, "rows", 5*time.Second)))
 
 	delivered := 4
@@ -290,7 +292,7 @@ func TestGrowthPullLatency(t *testing.T) {
 		delivered++
 		mark := time.Now()
 		appendShard(t, spoolDir, "s1.pcapng", 64)
-		m.setRows("s1.pcapng", delivered)
+		m.SetRows("s1.pcapng", delivered)
 		rowsMsg := readUntilType(t, ws, "rows", 3*time.Second)
 		require.Equal(t, []float64{float64(delivered)}, rowsNums(t, rowsMsg))
 		require.Less(t, time.Since(mark), 1500*time.Millisecond, "增长可见延迟超标(reload 节流+节拍+冲刷)")
@@ -303,21 +305,21 @@ func TestGrowthPullLatency(t *testing.T) {
 func TestHistoricalShardNoReload(t *testing.T) {
 	spoolDir := t.TempDir()
 	base := time.Now()
-	writeShard(t, spoolDir, "s1.pcapng", base, []byte("a"))
-	writeShard(t, spoolDir, "s2.pcapng", base.Add(time.Minute), []byte("b"))
+	testutil.WriteShard(t, spoolDir, "s1.pcapng", base, []byte("a"))
+	testutil.WriteShard(t, spoolDir, "s2.pcapng", base.Add(time.Minute), []byte("b"))
 	m := startMemSharkd(t)
-	m.setRows("s1.pcapng", 2)
-	m.setRows("s2.pcapng", 1)
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
-	ws := dialSession(t, mustSession(t, mgr, "tkn"))
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws))
+	m.SetRows("s1.pcapng", 2)
+	m.SetRows("s2.pcapng", 1)
+	mgr := newManager(t, m.Addr(), spoolDir)
+	ws, _ := dialSession(t, mustSession(t, mgr, "tkn"), true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	require.Equal(t, []float64{1}, rowsNums(t, readUntilType(t, ws, "rows", 5*time.Second)))
 
 	// 历史片 s1 外部追加：不重 load 不出新行（活动片为 s2）
 	appendShard(t, spoolDir, "s1.pcapng", 128)
-	m.setRows("s1.pcapng", 5)
+	m.SetRows("s1.pcapng", 5)
 	readNoFrame(t, ws)
-	require.Zero(t, countLoadOf(m.written(), "s1.pcapng"), "历史片零 load(冷启动不回放+追加不触发): %v", m.written())
+	require.Zero(t, countLoadOf(m.Written(), "s1.pcapng"), "历史片零 load(冷启动不回放+追加不触发): %v", m.Written())
 }
 
 // TestLargePullChunks 锁定大拉取块（pullLimit=2000）：sharkd frames 的 skip 每次
@@ -325,12 +327,12 @@ func TestHistoricalShardNoReload(t *testing.T) {
 // 行分片须 ≤2 次调用拉完（1 次数据 + 1 次追平探针），且请求带 limit=2000。
 func TestLargePullChunks(t *testing.T) {
 	spoolDir := t.TempDir()
-	writeShard(t, spoolDir, "s1.pcapng", time.Now(), []byte("pcap"))
+	testutil.WriteShard(t, spoolDir, "s1.pcapng", time.Now(), []byte("pcap"))
 	m := startMemSharkd(t)
-	m.setRows("s1.pcapng", 2000)
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
-	ws := dialSession(t, mustSession(t, mgr, "tkL"))
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws))
+	m.SetRows("s1.pcapng", 2000)
+	mgr := newManager(t, m.Addr(), spoolDir)
+	ws, _ := dialSession(t, mustSession(t, mgr, "tkL"), true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	seen := make(map[float64]bool)
 	require.Eventually(t, func() bool {
 		require.NoError(t, ws.SetReadDeadline(time.Now().Add(2*time.Second)))
@@ -349,7 +351,7 @@ func TestLargePullChunks(t *testing.T) {
 	}, 30*time.Second, 50*time.Millisecond, "2000 行应推完")
 
 	var calls []string
-	for _, l := range m.written() {
+	for _, l := range m.Written() {
 		if strings.Contains(l, `"method":"frames"`) {
 			calls = append(calls, l)
 		}
@@ -376,17 +378,17 @@ func TestLargePullChunks(t *testing.T) {
 // 增量拉取请求含 skip=游标值。memSharkd 对 skip≤0 回 -32600，协议违约即拉取全废。
 func TestFramesSkipSemantics(t *testing.T) {
 	spoolDir := t.TempDir()
-	writeShard(t, spoolDir, "s1.pcapng", time.Now(), []byte("pcap"))
+	testutil.WriteShard(t, spoolDir, "s1.pcapng", time.Now(), []byte("pcap"))
 	m := startMemSharkd(t)
-	m.setRows("s1.pcapng", 3)
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
-	ws := dialSession(t, mustSession(t, mgr, "tks"))
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws))
+	m.SetRows("s1.pcapng", 3)
+	mgr := newManager(t, m.Addr(), spoolDir)
+	ws, _ := dialSession(t, mustSession(t, mgr, "tks"), true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	require.Equal(t, []float64{1, 2, 3}, rowsNums(t, readUntilType(t, ws, "rows", 5*time.Second)))
 
 	// 起始拉取：frames 请求不含 skip 键
 	var frames []string
-	for _, l := range m.written() {
+	for _, l := range m.Written() {
 		if strings.Contains(l, `"method":"frames"`) {
 			frames = append(frames, l)
 		}
@@ -396,11 +398,11 @@ func TestFramesSkipSemantics(t *testing.T) {
 
 	// 游标推进后：增量拉取请求含 skip=游标值（已推 3 行；落盘 append 触发活动片 reload）
 	appendShard(t, spoolDir, "s1.pcapng", 64)
-	m.setRows("s1.pcapng", 5)
+	m.SetRows("s1.pcapng", 5)
 	require.Equal(t, []float64{4, 5}, rowsNums(t, readUntilType(t, ws, "rows", 5*time.Second)))
 	require.Eventually(t, func() bool {
 		frames = nil
-		for _, l := range m.written() {
+		for _, l := range m.Written() {
 			if strings.Contains(l, `"method":"frames"`) {
 				frames = append(frames, l)
 			}
@@ -415,35 +417,35 @@ func TestFramesSkipSemantics(t *testing.T) {
 func TestPauseResumeBackfill(t *testing.T) {
 	spoolDir := t.TempDir()
 	base := time.Now()
-	writeShard(t, spoolDir, "s1.pcapng", base, []byte("pcap"))
+	testutil.WriteShard(t, spoolDir, "s1.pcapng", base, []byte("pcap"))
 	m := startMemSharkd(t)
-	m.setRows("s1.pcapng", 2)
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
+	m.SetRows("s1.pcapng", 2)
+	mgr := newManager(t, m.Addr(), spoolDir)
 	sess := mustSession(t, mgr, "tk4")
 
-	ws1 := dialSession(t, sess)
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws1))
+	ws1, _ := dialSession(t, sess, true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws1))
 	require.Equal(t, []float64{1, 2}, rowsNums(t, readUntilType(t, ws1, "rows", 5*time.Second)))
 
 	// pause：冻结期活动分片增长 + 新分片轮换均不追不推
 	HandleCtl(sess, []byte(`{"type":"_ctl","op":"capture","state":"pause"}`))
 	time.Sleep(100 * time.Millisecond)
 	appendShard(t, spoolDir, "s1.pcapng", 96)
-	m.setRows("s1.pcapng", 5)           // 冻结期 s1（活动片）落盘增长：resume 时 reload 补推
+	m.SetRows("s1.pcapng", 5)           // 冻结期 s1（活动片）落盘增长：resume 时 reload 补推
 	time.Sleep(1200 * time.Millisecond) // 冻结期跨过检测与拉取窗口
 	readNoFrame(t, ws1)                 // 冻结期零推送（连接弃用）
 
 	// resume（重连，暂停态随流）：s1 仍为活动片 → reload → 增量 3-5 补推
-	ws2 := dialSession(t, sess)
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws2))
+	ws2, _ := dialSession(t, sess, true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws2))
 	HandleCtl(sess, []byte(`{"type":"_ctl","op":"capture","state":"resume"}`))
 	rowsMsg := readUntilType(t, ws2, "rows", 5*time.Second)
 	require.Equal(t, "s1.pcapng", rowsMsg["shard"])
 	require.Equal(t, []float64{3, 4, 5}, rowsNums(t, rowsMsg), "冻结期 s1 增量补推")
 
 	// 轮换：s2 落盘 → rotated + 新片全量（冻结期轮换补推语义）
-	writeShard(t, spoolDir, "s2.pcapng", base.Add(time.Minute), []byte("pcap"))
-	m.setRows("s2.pcapng", 2)
+	testutil.WriteShard(t, spoolDir, "s2.pcapng", base.Add(time.Minute), []byte("pcap"))
+	m.SetRows("s2.pcapng", 2)
 	require.JSONEq(t, `{"type":"rotated","shard":"s2.pcapng"}`,
 		string(marshalFrame(t, readUntilType(t, ws2, "rotated", 5*time.Second))))
 	rowsMsg = readUntilType(t, ws2, "rows", 5*time.Second)
@@ -458,16 +460,16 @@ func TestOutOfRingWindowReset(t *testing.T) {
 	base := time.Now()
 	m := startMemSharkd(t)
 	// 环窗压到 2 片：位置片须被 2 片新文件挤出窗
-	mgr := NewManager(Config{Sock: m.ln.Addr().String(), SpoolDir: spoolDir, RingSize: 2})
+	mgr := NewManager(Config{Sock: m.Addr(), SpoolDir: spoolDir, RingSize: 2})
 	t.Cleanup(mgr.Close)
 	for i := 1; i <= 2; i++ {
 		name := fmt.Sprintf("r%d.pcapng", i)
-		writeShard(t, spoolDir, name, base.Add(time.Duration(i)*time.Minute), []byte("p"))
-		m.setRows(name, 1)
+		testutil.WriteShard(t, spoolDir, name, base.Add(time.Duration(i)*time.Minute), []byte("p"))
+		m.SetRows(name, 1)
 	}
 	sess := mustSession(t, mgr, "tko")
-	ws := dialSession(t, sess)
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws))
+	ws, _ := dialSession(t, sess, true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
 	require.Equal(t, []float64{1}, rowsNums(t, readUntilType(t, ws, "rows", 5*time.Second))) // 位置=r2
 
 	// r3/r4 落盘：先按增量轮换消化（位置推进到窗内 r4），常驻读收集（连接不
@@ -491,14 +493,14 @@ func TestOutOfRingWindowReset(t *testing.T) {
 	// 同时落盘（单次事件批）→ 首轮走查即见窗=r5,r6 而位置 r4 出窗 → reset。
 	// 事件扇出时序竞态：r5 单独消化时窗仍含 r4（增量轮换无 reset），随后 r6
 	// 触发走查快照核对——两种路径都收敛到 reset，断言只锁最终集。
-	writeShard(t, spoolDir, "r3.pcapng", base.Add(3*time.Minute), []byte("p"))
-	m.setRows("r3.pcapng", 1)
-	writeShard(t, spoolDir, "r4.pcapng", base.Add(4*time.Minute), []byte("p"))
-	m.setRows("r4.pcapng", 2)
-	writeShard(t, spoolDir, "r5.pcapng", base.Add(5*time.Minute), []byte("p"))
-	m.setRows("r5.pcapng", 1)
-	writeShard(t, spoolDir, "r6.pcapng", base.Add(6*time.Minute), []byte("p"))
-	m.setRows("r6.pcapng", 2)
+	testutil.WriteShard(t, spoolDir, "r3.pcapng", base.Add(3*time.Minute), []byte("p"))
+	m.SetRows("r3.pcapng", 1)
+	testutil.WriteShard(t, spoolDir, "r4.pcapng", base.Add(4*time.Minute), []byte("p"))
+	m.SetRows("r4.pcapng", 2)
+	testutil.WriteShard(t, spoolDir, "r5.pcapng", base.Add(5*time.Minute), []byte("p"))
+	m.SetRows("r5.pcapng", 1)
+	testutil.WriteShard(t, spoolDir, "r6.pcapng", base.Add(6*time.Minute), []byte("p"))
+	m.SetRows("r6.pcapng", 2)
 	require.Eventually(t, func() bool { return sess.Shard() == "r6.pcapng" }, 10*time.Second, 20*time.Millisecond)
 	require.Eventually(t, func() bool {
 		sess.outMu.Lock()
@@ -548,22 +550,22 @@ drainFrames:
 // 从保存位置续推不重不漏。
 func TestAttachTakeover(t *testing.T) {
 	spoolDir := t.TempDir()
-	writeShard(t, spoolDir, "s1.pcapng", time.Now(), []byte("pcap"))
+	testutil.WriteShard(t, spoolDir, "s1.pcapng", time.Now(), []byte("pcap"))
 	m := startMemSharkd(t)
-	m.setRows("s1.pcapng", 4)
-	mgr := newManager(t, m.ln.Addr().String(), spoolDir)
+	m.SetRows("s1.pcapng", 4)
+	mgr := newManager(t, m.Addr(), spoolDir)
 	sess := mustSession(t, mgr, "tkd")
 
-	ws1 := dialSession(t, sess)
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, ws1))
+	ws1, _ := dialSession(t, sess, true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws1))
 	require.Equal(t, []float64{1, 2, 3, 4}, rowsNums(t, readUntilType(t, ws1, "rows", 5*time.Second)))
 
-	// 二次接入：Attach 返回旧连接；旧 writer 挂起在 PopFor 即时退出（不悬挂）
-	old := attachRaw(t, sess)
+	// 二次接入（不关旧连接）：Attach 返回旧连接；旧 writer 挂起在 PopFor 即时退出（不悬挂）
+	_, old := dialSession(t, sess, false)
 	require.NotNil(t, old, "Attach 应返回被顶替的旧连接")
-	require.Equal(t, `{"type":"hello","mode":"live"}`, readFrameString(t, wsOf(t, sess)))
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, wsOf(t, sess)))
 	appendShard(t, spoolDir, "s1.pcapng", 64)
-	m.setRows("s1.pcapng", 5)
+	m.SetRows("s1.pcapng", 5)
 	require.Equal(t, []float64{5}, rowsNums(t, readUntilType(t, wsOf(t, sess), "rows", 5*time.Second)),
 		"接管后新连接续推；旧连接不再收帧")
 
@@ -603,16 +605,6 @@ func TestLookup(t *testing.T) {
 
 // --- 小工具 ---
 
-// hasLoadOf 报告假 sharkd 是否收到过指定分片的 load 请求（同一行含 load 方法与路径）。
-func hasLoadOf(lines []string, shard string) bool {
-	for _, l := range lines {
-		if strings.Contains(l, `"method":"load"`) && strings.Contains(l, shard) {
-			return true
-		}
-	}
-	return false
-}
-
 // readFrameNonBlock 非阻塞读一帧（无帧返回 nil）——收集型断言用。
 func readFrameNonBlock(t *testing.T, ws *websocket.Conn) map[string]any {
 	t.Helper()
@@ -633,14 +625,14 @@ func readFrameNonBlock(t *testing.T, ws *websocket.Conn) map[string]any {
 // 空转烧 CPU。
 func TestLoadFailBackoff(t *testing.T) {
 	m := startMemSharkd(t)
-	m.failLoads.Store(1 << 30) // 注入持续失败的 load
+	m.FailLoads.Store(1 << 30) // 注入持续失败的 load
 	dir := t.TempDir()
-	mgr := newManager(t, m.ln.Addr().String(), dir)
-	writeShard(t, dir, "backoff.pcapng", time.Now(), make([]byte, 32))
+	mgr := newManager(t, m.Addr(), dir)
+	testutil.WriteShard(t, dir, "backoff.pcapng", time.Now(), make([]byte, 32))
 
 	s, err := mgr.GetOrCreate("st-backoff")
 	require.NoError(t, err)
-	attachRaw(t, s) // 解锁 worker 追帧（写循环已由 attachRaw 启动）
+	dialSession(t, s, false) // 解锁 worker 追帧（写循环已由接入启动）
 
 	// 5s 窗口：退避 1s→2s→4s 下 load 请求 ≤8 次；无退避（150ms 节拍）会到 30+
 	deadline := time.Now().Add(5 * time.Second)
@@ -648,7 +640,7 @@ func TestLoadFailBackoff(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	n := 0
-	for _, l := range m.written() {
+	for _, l := range m.Written() {
 		if strings.Contains(l, `"method":"load"`) && strings.Contains(l, "backoff.pcapng") {
 			n++
 		}

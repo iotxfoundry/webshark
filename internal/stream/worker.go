@@ -91,14 +91,11 @@ func (m *Manager) workerLoop(s *Session) {
 
 	var (
 		// 冷启动锚定最新分片（空 spool 等检测）：不回放环窗历史，见文件头注。
-		pos        = streamPos{shard: m.latestShard()}
-		loaded     string    // 实例当前 load 的分片（重拨/失败后复位强制重 load）
-		loadedSize int64     // load 时该分片的字节数（load=内存快照，增长检测依据）
-		lastLoad   time.Time // 最近一次成功 load 时刻（reload 节流）
-		lastPush   string    // 最近推送分片（rotated 只在切换时发）
-		needScan   = true    // 首轮走查：自锚点对齐到最新
-		lastPull   time.Time
-		b          = batch{s: s, mode: "live"}
+		pos      = streamPos{shard: m.latestShard()}
+		ld       shardLoad // 实例加载/推送登记（worker 会话级，串行访问）
+		needScan = true    // 首轮走查：自锚点对齐到最新
+		lastPull time.Time
+		b        = batch{s: s, mode: "live"}
 	)
 	flush := time.NewTicker(flushInterval)
 	defer flush.Stop()
@@ -128,7 +125,7 @@ func (m *Manager) workerLoop(s *Session) {
 		filter := s.Filter() // 筛选=同一管道的参数（空串=普通模式）
 		if needScan {
 			needScan = false
-			m.backfill(s, &pos, &loaded, &loadedSize, &lastLoad, &lastPush, &b, filter)
+			m.backfill(s, &pos, &ld, &b, filter)
 			continue
 		}
 		if time.Since(lastPull) < pullInterval {
@@ -144,11 +141,10 @@ func (m *Manager) workerLoop(s *Session) {
 			needScan = true
 			continue
 		}
-		if err := m.pullShard(s, pos.shard, &pos, &b, &loadedSize, &lastLoad, filter); err != nil {
+		if err := m.pullShard(s, pos.shard, &pos, &b, &ld, filter); err != nil {
 			ra := s.markPullFail()
-			m.log.Warn("实时增量拉取失败", "handle", s.handle, "err", err, "退避", ra.Sub(time.Now()))
-			loaded = ""    // 连接状态可疑：下轮强制重 load
-			loadedSize = 0 // 复位（伴随 loaded）
+			m.log.Warn("实时增量拉取失败", "handle", s.handle, "err", err, "退避", time.Until(ra))
+			ld.resetLoad() // 连接状态可疑：下轮强制重 load
 			needScan = true
 		} else {
 			s.clearPullFail()
@@ -156,9 +152,37 @@ func (m *Manager) workerLoop(s *Session) {
 	}
 }
 
+// shardLoad worker 会话级实例登记：当前 load 的分片（重拨/失败后复位强制重
+// load）、load 时该分片的字节数（load=内存快照，增长检测依据）、最近成功 load
+// 时刻（reload 节流）、最近推送分片（rotated 只在切换时发）。
+type shardLoad struct {
+	loaded     string
+	loadedSize int64
+	lastLoad   time.Time
+	lastPush   string
+}
+
+// resetLoad 复位加载登记（连接状态可疑/加载失败/片出窗）：下轮强制重 load。
+func (ld *shardLoad) resetLoad() {
+	ld.loaded = ""
+	ld.loadedSize = 0
+}
+
+// resetOutOfWindow 位置分片出环窗：丢弃未发批、reset 对齐、位置与实例状态归零
+// （当前状态全量重推）。
+func (m *Manager) resetOutOfWindow(s *Session, pos *streamPos, ld *shardLoad, b *batch, why string) {
+	b.discard()
+	s.realign()
+	out := pos.shard // 清空前取值（日志实值）
+	*pos = streamPos{}
+	ld.resetLoad()   // 会话 load 的旧片亦出窗：复位强制重 load 窗内片
+	ld.lastPush = "" // 全量重推：rotated 重新发
+	m.log.Info(why, "handle", s.handle, "shard", out)
+}
+
 // loadShard load 分片并记录快照字节数（sharkd load=内存快照：load 后分片追加
 // 字节对会话不可见，size 是活动片增长重 load 的检测依据）。
-func (m *Manager) loadShard(s *Session, shard string, loadedSize *int64) error {
+func (m *Manager) loadShard(s *Session, shard string, ld *shardLoad) error {
 	path := filepath.Join(m.cfg.SpoolDir, shard)
 	// load 是全量重解析：数万包的大分片在低配设备上可能超过客户端默认 10s，
 	// 超时会导致连接被丢弃后重拨、再全量解析的会话抖动（sharkd 日志反复
@@ -167,9 +191,9 @@ func (m *Manager) loadShard(s *Session, shard string, loadedSize *int64) error {
 		return err
 	}
 	if fi, err := os.Stat(path); err == nil {
-		*loadedSize = fi.Size()
+		ld.loadedSize = fi.Size()
 	} else {
-		*loadedSize = 0
+		ld.loadedSize = 0
 	}
 	return nil
 }
@@ -180,21 +204,14 @@ func (m *Manager) loadShard(s *Session, shard string, loadedSize *int64) error {
 // 模式（非空 filter）同管道透传，位置归零即全窗走查。节流语义：已 load 分片
 // 不重 load（检测事件风暴零重解析），串行循环=解析不叠加；推送由出站队列背压
 // 节流（消费速度决定），走查快于窗滑即收敛；ctx/paused 逐片检查。
-func (m *Manager) backfill(s *Session, pos *streamPos, loaded *string, loadedSize *int64, lastLoad *time.Time, lastPush *string, b *batch, filter string) {
+func (m *Manager) backfill(s *Session, pos *streamPos, ld *shardLoad, b *batch, filter string) {
 	shards := m.ringWindowAsc()
 	start := 0
 	if pos.shard != "" {
 		idx := slices.IndexFunc(shards, func(f spool.Shard) bool { return f.Name == pos.shard })
 		if idx < 0 {
 			// 位置分片已被滚动清理/出环窗：超缓冲 → reset 全量对齐
-			b.discard()
-			s.realign()
-			out := pos.shard // 清空前取值（日志实值）
-			*pos = streamPos{}
-			*loaded = "" // 会话 load 的旧片亦出窗：复位强制重 load 窗内片
-			*loadedSize = 0
-			*lastPush = "" // 全量重推：rotated 重新发
-			m.log.Info("追帧位置分片已清理/出窗，reset 全量重推", "handle", s.handle, "shard", out)
+			m.resetOutOfWindow(s, pos, ld, b, "追帧位置分片已清理/出窗，reset 全量重推")
 		} else {
 			start = idx
 		}
@@ -204,15 +221,14 @@ func (m *Manager) backfill(s *Session, pos *streamPos, loaded *string, loadedSiz
 			return
 		}
 		name := shards[i].Name
-		if *loaded != name {
-			if err := m.loadShard(s, name, loadedSize); err != nil {
-				*loaded = ""
-				*loadedSize = 0 // 复位（伴随 loaded）
+		if ld.loaded != name {
+			if err := m.loadShard(s, name, ld); err != nil {
+				ld.resetLoad() // 复位（伴随 loaded）
 				ra := s.markPullFail()
-				m.log.Warn("load 分片失败", "handle", s.handle, "shard", name, "err", err, "退避", ra.Sub(time.Now()))
+				m.log.Warn("load 分片失败", "handle", s.handle, "shard", name, "err", err, "退避", time.Until(ra))
 				return // 下轮事件/周期重试
 			}
-			*loaded = name
+			ld.loaded = name
 			s.setCurShard(name)
 		}
 		if pos.shard != name { // 换片：游标归零（游标是片内结果集偏移，不跨片延续）
@@ -220,13 +236,12 @@ func (m *Manager) backfill(s *Session, pos *streamPos, loaded *string, loadedSiz
 			pos.cursor = 0
 			b.flush() // 片界冲刷：上片未满批先于本片 rotated 下发（行不混 shard）
 		}
-		if *lastPush != name {
+		if ld.lastPush != name {
 			s.Enqueue(RotatedFrame(name))
-			*lastPush = name
+			ld.lastPush = name
 		}
-		if err := m.pullShard(s, name, pos, b, loadedSize, lastLoad, filter); err != nil {
-			*loaded = ""
-			*loadedSize = 0 // 复位（伴随 loaded）
+		if err := m.pullShard(s, name, pos, b, ld, filter); err != nil {
+			ld.resetLoad() // 复位（伴随 loaded）
 			m.log.Warn("补推拉取失败", "handle", s.handle, "shard", name, "err", err)
 			return
 		}
@@ -236,14 +251,7 @@ func (m *Manager) backfill(s *Session, pos *streamPos, loaded *string, loadedSiz
 	// 期间窗滑过位置即 reset 对齐，收敛语义）
 	if pos.shard != "" {
 		if idx := slices.IndexFunc(m.ringWindowAsc(), func(f spool.Shard) bool { return f.Name == pos.shard }); idx < 0 {
-			b.discard()
-			s.realign()
-			out := pos.shard
-			*pos = streamPos{}
-			*loaded = ""
-			*loadedSize = 0
-			*lastPush = ""
-			m.log.Info("走查后位置出窗，reset 全量重推", "handle", s.handle, "shard", out)
+			m.resetOutOfWindow(s, pos, ld, b, "走查后位置出窗，reset 全量重推")
 		}
 	}
 }
@@ -253,14 +261,14 @@ func (m *Manager) backfill(s *Session, pos *streamPos, loaded *string, loadedSiz
 // 携 filter 逐帧重评估，行帧 mode:"filter"），空串=普通模式（不携 filter——契约）。
 // 活动分片（=环窗最新）增长时按 size 重 load（sharkd load=内存快照，追加字节
 // 对已 load 会话不可见；节流 reloadInterval；历史片不可变，不 stat 不重 load）。
-func (m *Manager) pullShard(s *Session, shard string, pos *streamPos, b *batch, loadedSize *int64, lastLoad *time.Time, filter string) error {
+func (m *Manager) pullShard(s *Session, shard string, pos *streamPos, b *batch, ld *shardLoad, filter string) error {
 	if shard == m.latestShard() { // 活动片：增长检测（size 增长 + 节流）
 		if fi, err := os.Stat(filepath.Join(m.cfg.SpoolDir, shard)); err == nil &&
-			fi.Size() > *loadedSize && time.Since(*lastLoad) >= reloadInterval {
-			if lerr := m.loadShard(s, shard, loadedSize); lerr != nil {
+			fi.Size() > ld.loadedSize && time.Since(ld.lastLoad) >= reloadInterval {
+			if lerr := m.loadShard(s, shard, ld); lerr != nil {
 				return lerr
 			}
-			*lastLoad = time.Now()
+			ld.lastLoad = time.Now()
 		}
 	}
 	b.flush() // 分片边界：先冲上一片未满批（行不混 shard）
@@ -279,7 +287,7 @@ func (m *Manager) pullShard(s *Session, shard string, pos *streamPos, b *batch, 
 			Skip   int    `json:"skip,omitempty"`   // 0 序省略（sharkd UINTEGER: skip 须 >0，省略=从第 1 行）
 			Filter string `json:"filter,omitempty"` // 普通模式不携（契约）
 		}{pullLimit, pos.cursor, filter}
-		res, err := s.Call("frames", params)
+		res, err := s.CallCtx(s.ctx, "frames", params)
 		if err != nil {
 			return err
 		}
