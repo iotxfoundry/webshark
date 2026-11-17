@@ -143,7 +143,7 @@ describe("CapturePage", () => {
     statusReply = { connected: true, files: [{ name: "a.pcapng", size: 1, mtime: "" }, { name: "b.pcapng", size: 1, mtime: "" }] };
     const openToken = vi.fn();
     await mountOpen([wire(1)], "a.pcapng", { onOpenToken: openToken });
-    expect(screen.getByText("webshark")).toBeVisible();
+    expect(screen.getByText("Webshark")).toBeVisible();
     expect(screen.getByText("sharkd 在线")).toBeInTheDocument();
     expect(screen.getByText("2 分片")).toBeInTheDocument();
     expect(screen.getByText("已连接")).toBeInTheDocument();
@@ -161,7 +161,7 @@ describe("CapturePage", () => {
   it("工具栏 embedded: 品牌隐藏(占位保留) + 主题/令牌钮隐藏 + status 失败 → sharkd 离线徽章", async () => {
     statusReply = { connected: false, files: [], reason: "sharkd 未就绪" };
     await mountOpen([], "a.pcapng", { embedded: true });
-    const brand = screen.getByText("webshark");
+    const brand = screen.getByText("Webshark");
     expect(brand).not.toBeVisible(); // visibility 隐藏, 工具栏高度不跳
     expect(screen.getByText("sharkd 离线")).toBeInTheDocument();
     expect(screen.getByText("0 分片")).toBeInTheDocument();

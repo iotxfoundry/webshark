@@ -244,7 +244,7 @@ export default function CapturePage({ embedded = false, onOpenToken }: { embedde
       <div className={styles.toolbar}>
         {/* 品牌: standalone 显示; embedded 用 visibility 隐藏(占位不跳高度) */}
         <Text weight="semibold" size={500} style={{ visibility: embedded ? "hidden" : "visible" }}>
-          webshark
+          Webshark
         </Text>
         <Badge appearance="tint" color={status?.connected ? "success" : "danger"}
           title={status?.connected ? "sharkd 已连接" : `sharkd 不可达${status?.reason ? `: ${status.reason}` : ""}`}>
