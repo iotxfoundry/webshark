@@ -159,7 +159,7 @@ func (s *Server) staticHandler() http.Handler {
 
 // placeholderHTML 前端未构建时的提示页。
 const placeholderHTML = `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><title>webshark</title></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Webshark</title></head>
 <body><h1>webshark 前端未构建</h1>
 <p>静态站点缺失，请先在仓库根目录执行 <code>make web</code> 构建前端产物后重启服务。</p>
 <p>HTTP 接口（/api/*）不受影响，可直接调用。</p></body></html>`
