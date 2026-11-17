@@ -31,6 +31,13 @@ const (
 	// （filter 模式逐帧重评估 dfilter），拉取成本 O(游标) 与 limit 无关——大拉取
 	// 把重扫次数降一个量级；2000 行×KB 级行远小于客户端消息上限。
 	pullLimit = 2000
+	// loadTimeout 单次 load 超时：全量重解析大分片在低配设备上可能超过
+	// 客户端默认 10s，超时会断连重拨（sharkd 日志反复 Hello in child）
+	loadTimeout = 60 * time.Second
+	// retryBackoffMax 拉取/加载失败后的重试退避上限（指数 1s→2s→…→10s）；
+	// sharkd 子进程崩溃或解析超时会形成「断连→重拨→全量重 load」循环，
+	// 退避避免该循环空转烧 CPU
+	retryBackoffMax = 10 * time.Second
 	// reloadInterval 活动分片重 load 最小间隔：sharkd load=内存快照，load 后
 	// 分片追加字节对会话不可见（不重 load 看不到追加行）——按 size 增长检测重
 	// load，节流防高频 stat+load；增长可见延迟 ≤ reloadInterval+节拍+冲刷。
@@ -111,6 +118,9 @@ func (m *Manager) workerLoop(s *Session) {
 		if s.Paused() || !s.attached() {
 			continue // 追帧暂停/无前端：会话冻结，不追不推，位置随流保留
 		}
+		if s.pullFailBackoff() {
+			continue // 拉取/加载失败退避中：不追帧不重 load，微批照常冲刷
+		}
 		if pf, ok := s.takePendingFilter(); ok { // 筛选进/出/切换
 			m.applyFilter(s, pf, &pos, &b)
 			continue
@@ -135,10 +145,13 @@ func (m *Manager) workerLoop(s *Session) {
 			continue
 		}
 		if err := m.pullShard(s, pos.shard, &pos, &b, &loadedSize, &lastLoad, filter); err != nil {
-			m.log.Warn("实时增量拉取失败", "handle", s.handle, "err", err)
+			ra := s.markPullFail()
+			m.log.Warn("实时增量拉取失败", "handle", s.handle, "err", err, "退避", ra.Sub(time.Now()))
 			loaded = ""    // 连接状态可疑：下轮强制重 load
 			loadedSize = 0 // 复位（伴随 loaded）
 			needScan = true
+		} else {
+			s.clearPullFail()
 		}
 	}
 }
@@ -147,7 +160,10 @@ func (m *Manager) workerLoop(s *Session) {
 // 字节对会话不可见，size 是活动片增长重 load 的检测依据）。
 func (m *Manager) loadShard(s *Session, shard string, loadedSize *int64) error {
 	path := filepath.Join(m.cfg.SpoolDir, shard)
-	if _, err := s.Call("load", map[string]string{"file": path}); err != nil {
+	// load 是全量重解析：数万包的大分片在低配设备上可能超过客户端默认 10s，
+	// 超时会导致连接被丢弃后重拨、再全量解析的会话抖动（sharkd 日志反复
+	// Hello in child），故放宽到 60s
+	if _, err := s.CallTimeout("load", map[string]string{"file": path}, loadTimeout); err != nil {
 		return err
 	}
 	if fi, err := os.Stat(path); err == nil {
@@ -192,7 +208,8 @@ func (m *Manager) backfill(s *Session, pos *streamPos, loaded *string, loadedSiz
 			if err := m.loadShard(s, name, loadedSize); err != nil {
 				*loaded = ""
 				*loadedSize = 0 // 复位（伴随 loaded）
-				m.log.Warn("load 分片失败", "handle", s.handle, "shard", name, "err", err)
+				ra := s.markPullFail()
+				m.log.Warn("load 分片失败", "handle", s.handle, "shard", name, "err", err, "退避", ra.Sub(time.Now()))
 				return // 下轮事件/周期重试
 			}
 			*loaded = name

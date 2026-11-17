@@ -41,7 +41,9 @@ type Session struct {
 	filter   string // 生效筛选串（空串=普通模式；worker 侧写）
 	pendSet  bool   // 待生效筛选请求（WS/subscribe 提交，worker tick 取走执行）
 	pendVal  string
-	curShard string // 实时实例当前 load 的分片（frame 路由依据）
+	curShard string    // 实时实例当前 load 的分片（frame 路由依据）
+	pullErrs int       // 连续拉取/加载失败次数（成功清零，驱动指数退避）
+	retryAft time.Time // 退避截止时刻（此前不追帧不重 load）
 
 	outMu     sync.Mutex
 	outCond   *sync.Cond
@@ -157,8 +159,22 @@ func (s *Session) Shard() string {
 }
 
 // Call 走该流专属实例（懒拨号；与 worker 追帧共用，客户端内串行）。
-// sharkd.Error 原样返回。
+// 超时取 sharkd 客户端默认值（10s）；sharkd.Error 原样返回。
 func (s *Session) Call(method string, params any) (json.RawMessage, error) {
+	return s.CallCtx(s.ctx, method, params)
+}
+
+// CallTimeout 带独立超时的调用（load 类大文件全量解析可放宽，防慢设备上
+// 解析超时导致连接被丢弃后重拨、再全量解析的会话抖动）。
+func (s *Session) CallTimeout(method string, params any, timeout time.Duration) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(s.ctx, timeout)
+	defer cancel()
+	return s.CallCtx(ctx, method, params)
+}
+
+// CallCtx 以指定 ctx 调用（懒拨号；与 worker 追帧共用，客户端内串行）。
+// sharkd.Error 原样返回；会话关闭即取消在途请求（连接随之丢弃）。
+func (s *Session) CallCtx(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	s.sharkMu.Lock()
 	defer s.sharkMu.Unlock()
 	if s.ctx.Err() != nil {
@@ -167,8 +183,7 @@ func (s *Session) Call(method string, params any) (json.RawMessage, error) {
 	if s.shark == nil {
 		s.shark = sharkd.NewClient(s.m.cfg.Sock)
 	}
-	// 会话 ctx：会话关闭即取消在途请求（连接随之丢弃），调用方得到 ctx 错误
-	return s.shark.Call(s.ctx, method, params)
+	return s.shark.Call(ctx, method, params)
 }
 
 // closeShark 关停专属实例（worker 退出即关连接）。
@@ -219,6 +234,32 @@ func (s *Session) setFilter(f string) {
 	s.stMu.Lock()
 	s.filter = f
 	s.stMu.Unlock()
+}
+
+// markPullFail 记一次拉取/加载失败并返回退避截止时刻（指数 1s→2s→…→10s）：
+// 防 sharkd 子进程崩溃或大分片解析超时形成「断连→重拨→全量重 load」循环空转。
+func (s *Session) markPullFail() time.Time {
+	s.stMu.Lock()
+	defer s.stMu.Unlock()
+	s.pullErrs++
+	d := min(time.Duration(1<<uint(s.pullErrs-1))*time.Second, retryBackoffMax)
+	s.retryAft = time.Now().Add(d)
+	return s.retryAft
+}
+
+// clearPullFail 拉取/加载成功：退避清零（恢复正常节拍）。
+func (s *Session) clearPullFail() {
+	s.stMu.Lock()
+	s.pullErrs = 0
+	s.retryAft = time.Time{}
+	s.stMu.Unlock()
+}
+
+// pullFailBackoff 报告退避期内（不追帧不重 load，微批照常冲刷）。
+func (s *Session) pullFailBackoff() bool {
+	s.stMu.Lock()
+	defer s.stMu.Unlock()
+	return time.Now().Before(s.retryAft)
 }
 
 // ---- 出站队列（单生产者/单消费者） ----

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,6 +35,7 @@ type memSharkd struct {
 	recv   []string       // 收到的请求行（上游断言 skip 游标/filter 透传/load 次数）
 
 	slowFrames time.Duration // frames 响应延迟（轻查询并行不互扰验证用）
+	failLoads  atomic.Int32  // 测试用：注入前 N 次 load 失败（0=不失败），验证退避
 }
 
 func startMemSharkd(t *testing.T) *memSharkd {
@@ -115,6 +117,10 @@ func (m *memSharkd) serve(c net.Conn) {
 func (m *memSharkd) dispatch(id int, method string, p memParams, rawParams json.RawMessage, snap *int) []byte {
 	switch method {
 	case "load":
+		if n := m.failLoads.Add(-1); n >= 0 { // 配额未尽：注入 load 失败（模拟慢盘/分片被覆盖）
+			return fmt.Appendf(nil,
+				`{"jsonrpc":"2.0","id":%d,"error":{"code":-2,"message":"open %s: no such file"}}`, id, p.File)
+		}
 		if _, err := os.Stat(p.File); err != nil {
 			return fmt.Appendf(nil,
 				`{"jsonrpc":"2.0","id":%d,"error":{"code":-2,"message":"open %s: no such file"}}`, id, p.File)

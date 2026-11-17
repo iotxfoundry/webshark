@@ -626,3 +626,32 @@ func readFrameNonBlock(t *testing.T, ws *websocket.Conn) map[string]any {
 	require.NoError(t, json.Unmarshal(data, &m))
 	return m
 }
+
+// TestLoadFailBackoff 锁定 load 持续失败下的指数退避：注入持续失败的 load，
+// 退避期（1s→2s→4s…）内 worker 的 load 请求频率必须显著低于 150ms 轮询节拍
+// ——否则 sharkd 子进程崩溃/解析超时形成的「断连→重拨→全量重 load」循环会
+// 空转烧 CPU。
+func TestLoadFailBackoff(t *testing.T) {
+	m := startMemSharkd(t)
+	m.failLoads.Store(1 << 30) // 注入持续失败的 load
+	dir := t.TempDir()
+	mgr := newManager(t, m.ln.Addr().String(), dir)
+	writeShard(t, dir, "backoff.pcapng", time.Now(), make([]byte, 32))
+
+	s, err := mgr.GetOrCreate("st-backoff")
+	require.NoError(t, err)
+	attachRaw(t, s) // 解锁 worker 追帧（写循环已由 attachRaw 启动）
+
+	// 5s 窗口：退避 1s→2s→4s 下 load 请求 ≤8 次；无退避（150ms 节拍）会到 30+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+	}
+	n := 0
+	for _, l := range m.written() {
+		if strings.Contains(l, `"method":"load"`) && strings.Contains(l, "backoff.pcapng") {
+			n++
+		}
+	}
+	require.LessOrEqual(t, n, 8, "退避期内 load 请求频率过高: %d", n)
+}
