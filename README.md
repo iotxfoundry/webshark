@@ -58,7 +58,7 @@ bin/webshark -listen 127.0.0.1:8080
 镜像三合一：`dumpcap`（抓包）+ `sharkd`（解析）+ `webshark`（服务），单容器即完整 appliance。运行时基座为 Debian testing，其 sharkd/dumpcap 为 4.6.x，与本项目协议校准基线一致。
 
 ```sh
-make image        # = make build + docker build -f build/Dockerfile
+make docker       # = make build + docker build -f build/Dockerfile
 ```
 
 镜像内即含三件套（`dumpcap`/`sharkd` 来自 Debian testing 的 wireshark-common 4.6.x；`webshark` 二进制在编译期内嵌前端），构建为单阶段打包本地产物，无多阶段构建。

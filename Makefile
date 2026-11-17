@@ -10,7 +10,7 @@ PKGS := ./...
 # 打包时归一化 mtime：内容不变则 zip 字节不变，避免无意义二进制差异
 ZIP_EPOCH := 202001010000.00
 
-.PHONY: all build web test vet fmt image image-push clean
+.PHONY: all build web test vet fmt docker docker-push clean
 
 # 全量构建：前端产物 + 二进制
 all: web build
@@ -36,11 +36,11 @@ fmt:
 
 # 容器镜像：dumpcap + sharkd + webshark 三合一（见 Dockerfile）
 # 容器镜像：打包 make build 产物（二进制在编译期内嵌前端 dist.zip）；
-# 前端有改动先 make web 再 make image
-image: build
+# 前端有改动先 make web 再 make docker
+docker: build
 	docker build -f build/Dockerfile -t $(IMAGE):$(TAG) .
 
-image-push: image
+docker-push: docker
 	docker push $(IMAGE):$(TAG)
 
 # 只清构建产物；web/dist.zip 是入库产物，不在此列（用 make web 重新生成）
