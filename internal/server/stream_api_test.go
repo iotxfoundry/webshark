@@ -200,3 +200,21 @@ func connCount(t *testing.T, shard string) int {
 	t.Helper()
 	return 0
 }
+
+// TestStaticFontContentType 锁定字体静态资源可用性：Go 内建 mime 表不含
+// woff/woff2，未知 Content-Type 会触发 http.ServeContent 的嗅探回退（Seek
+// 折返），而内嵌站点 FS（zip）不支持 Seek → 500 "seeker can't seek"。
+// init() 显式注册字体 mime 后，无论系统 mime.types 是否存在都必须 200。
+func TestStaticFontContentType(t *testing.T) {
+	_, ts, _, _ := newServer(t, nil)
+	for name, ctype := range map[string]string{
+		"assets/fira-code-latin-400-normal-DGosTW8U.woff2":   "font/woff2",
+		"assets/fira-code-cyrillic-400-normal-dc1q3VD7.woff": "font/woff",
+	} {
+		resp, err := http.Get(ts.URL + "/" + name)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, resp.StatusCode, name)
+		require.Equal(t, ctype, resp.Header.Get("Content-Type"), name)
+		_ = resp.Body.Close()
+	}
+}

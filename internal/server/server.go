@@ -6,6 +6,7 @@ package server
 import (
 	"io/fs"
 	"log/slog"
+	"mime"
 	"net/http"
 	"strings"
 	"sync"
@@ -20,6 +21,16 @@ import (
 
 // statusProbeTimeout status 探活拨号超时。
 const statusProbeTimeout = time.Second
+
+// 字体格式显式注册进进程 mime 表：Go 内建表不含 woff/woff2，未知扩展名时
+// http.ServeContent 走内容嗅探回退（Seek 折返），而内嵌站点 FS（zip）不支持
+// Seek → 500 "seeker can't seek"。精简容器镜像常无 /etc/mime.types，不能
+// 依赖系统 mime 库。AddExtensionType 会覆盖系统库同名映射，行为即固定。
+func init() {
+	_ = mime.AddExtensionType(".woff2", "font/woff2")
+	_ = mime.AddExtensionType(".woff", "font/woff")
+	_ = mime.AddExtensionType(".ttf", "font/ttf")
+}
 
 // Config 服务配置（零值可用：Web 回落内嵌站点，Log 回落默认 logger）。
 type Config struct {
