@@ -35,7 +35,7 @@ type memSharkd struct {
 	loaded     string
 	loads      map[string]int // 分片 basename → load 次数
 	tapDetails int            // 测试用：tap 响应生成的专家明细条数（0=空列表，默认不变）
-	frameRange int            // 测试用：frame 响应的帧号上界（0=不校验，模拟 sharkd -8003 越界）
+	snapFrames int64          // 测试用：load 时的快照帧数（模拟 sharkd load=内存快照：此后文件增长不可见）
 }
 
 func startFakeSharkd(t *testing.T) *memSharkd {
@@ -130,12 +130,15 @@ func (m *memSharkd) dispatch(req fakeReq, p fakeParams, snap *string) []byte {
 			return respErr(-2, "open "+p.File+": no such file")
 		}
 		base := filepath.Base(p.File)
+		if fi, err := os.Stat(p.File); err == nil {
+			m.snapFrames = fi.Size() // 简化模型：每字节一帧；load=快照，增长需重 load
+		}
 		m.loaded = base
 		m.loads[base]++
 		*snap = base
 		return resp(`{"err":0}`)
 	case "frame":
-		if m.frameRange > 0 && p.Frame > m.frameRange {
+		if int64(p.Frame) > m.snapFrames {
 			return respErr(-8003, "Invalid frame - The frame number requested is out of range")
 		}
 		return resp(fmt.Sprintf(`{"err":0,"num":%d,"loaded":%q,"tree":"detail-%d"}`, p.Frame, *snap, p.Frame))
@@ -414,7 +417,7 @@ func TestFrame(t *testing.T) {
 
 	t.Run("当前分片也走缓存实例且只load一次", func(t *testing.T) {
 		_, ts, spoolDir, sock := newServer(t, nil)
-		writeShard(t, spoolDir, "live.pcapng", base, []byte("pcap"))
+		writeShard(t, spoolDir, "live.pcapng", base, make([]byte, 32))
 		// WS 接入（建流并解锁 worker 追帧：无连接会话冻结不 load）
 		ws, err := dialWS(t, ts, nil, "handle=st-live")
 		require.NoError(t, err)
@@ -439,7 +442,7 @@ func TestFrame(t *testing.T) {
 		// spool 为空时会话无分片，shard 显式给出即路由缓存实例）
 		for i := 0; i < 13; i++ {
 			name := fmt.Sprintf("hist_%02d.pcapng", i)
-			writeShard(t, spoolDir, name, base.Add(time.Duration(i)*time.Minute), []byte("pcap"))
+			writeShard(t, spoolDir, name, base.Add(time.Duration(i)*time.Minute), make([]byte, 32))
 		}
 		// 逐片查一次：13 次 load（容量 12，首个被淘汰）
 		for i := 0; i < 13; i++ {

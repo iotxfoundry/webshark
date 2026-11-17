@@ -4,6 +4,7 @@
 package server
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -19,7 +20,7 @@ import (
 func TestFrameAlwaysUsesCache(t *testing.T) {
 	base := time.Unix(1700000000, 0)
 	_, ts, spoolDir, sock := newServer(t, nil)
-	writeShard(t, spoolDir, "live.pcapng", base, []byte("pcap"))
+	writeShard(t, spoolDir, "live.pcapng", base, make([]byte, 32))
 	// WS 接入解锁 worker 追帧，等实时实例 load live.pcapng
 	ws, err := dialWS(t, ts, nil, "handle=st-cc")
 	require.NoError(t, err)
@@ -144,9 +145,8 @@ func TestTapDetailsCapped(t *testing.T) {
 // 成功但帧号越界（sharkd -8003）→ 404 + 明确中文说明（含覆盖/清理原因），
 // 而非透传 sharkd 英文原文让使用者无从判断。
 func TestFrameOutOfRangeShardContentReplaced(t *testing.T) {
-	_, ts, spoolDir, sock := newServer(t, nil)
-	sock.frameRange = 100 // 假 sharkd: 帧号 >100 视为越界
-	writeShard(t, spoolDir, "live.pcapng", time.Unix(1700000000, 0), []byte("pcap"))
+	_, ts, spoolDir, _ := newServer(t, nil)
+	writeShard(t, spoolDir, "live.pcapng", time.Unix(1700000000, 0), make([]byte, 32))
 	ws, err := dialWS(t, ts, nil, "handle=st-oob")
 	require.NoError(t, err)
 	readFrame(t, ws) // hello
@@ -159,4 +159,22 @@ func TestFrameOutOfRangeShardContentReplaced(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, code)
 	require.Contains(t, body["message"], "覆盖", "应说明分片内容被覆盖的成因")
 	require.Equal(t, float64(-8003), body["code"], "透传 sharkd 错误码供宿主判断")
+}
+
+// TestFrameCacheReloadsGrownShard 锁定活动分片增长的详情可用性：分片缓存实例
+// 驻留的是 load 时刻的快照，活动分片持续追加后快照帧数已落后——缓存命中必须
+// 按「文件尺寸变化即重 load」刷新快照，否则新推送行的帧详情全部越界 404。
+func TestFrameCacheReloadsGrownShard(t *testing.T) {
+	_, ts, spoolDir, _ := newServer(t, nil)
+	name := "grow.pcapng"
+	writeShard(t, spoolDir, name, time.Unix(1700000000, 0), make([]byte, 100)) // 100 帧
+	subscribe(t, ts, "st-grow")
+	code, body := getJSON(t, ts, fmt.Sprintf("/api/frame?handle=st-grow&shard=%s&num=70", name))
+	require.Equal(t, http.StatusOK, code, "初次查询（快照 100 帧）应成功: %v", body)
+
+	// 分片追加到 200 帧（同名覆盖写，模拟 dumpcap 持续落盘）
+	writeShard(t, spoolDir, name, time.Unix(1700000000, 0), make([]byte, 200))
+	code, body = getJSON(t, ts, fmt.Sprintf("/api/frame?handle=st-grow&shard=%s&num=150", name))
+	require.Equal(t, http.StatusOK, code, "增长后查询应触发重 load 而非命中旧快照: %v", body)
+	require.Equal(t, float64(150), body["num"])
 }
