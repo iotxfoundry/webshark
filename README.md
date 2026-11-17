@@ -110,6 +110,7 @@ docker run -d --name webshark -p 8080:8080 \
 | `DUMPCAP_FILTER` | 空 | BPF 捕获过滤串 |
 | `DUMPCAP_FILESIZE` | `8388608` | 单分片字节数 |
 | `DUMPCAP_FILES` | `16` | 分片数（容器内自动与 `-ring` 对齐） |
+| `DUMPCAP_STDERR` | `/dev/null` | dumpcap stderr 去向（其 `\rPackets: N` 进度行在容器日志中会与其他进程日志穿插；调试时设 `/dev/stderr` 或文件路径） |
 
 说明：容器内进程以 root 运行，dumpcap 的抓包能力来自运行时授予的 capabilities，不写入镜像；默认监听 `0.0.0.0` 时必须设置 token，如需免 token 请 `--network host` 并设 `LISTEN=127.0.0.1:8080`。
 

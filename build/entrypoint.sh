@@ -22,6 +22,9 @@ DUMPCAP_IFACE="${DUMPCAP_IFACE:-eth0}"
 DUMPCAP_FILTER="${DUMPCAP_FILTER:-}"
 DUMPCAP_FILESIZE="${DUMPCAP_FILESIZE:-8388608}"
 DUMPCAP_FILES="${DUMPCAP_FILES:-16}"
+# dumpcap 默认向 stderr 打 \r 进度行（终端用, 在容器日志里与 sharkd 日志穿插成乱行）;
+# 默认静音, 调试时设为 /dev/stderr 或文件路径
+DUMPCAP_STDERR="${DUMPCAP_STDERR:-/dev/null}"
 
 mkdir -p "$(dirname "$SHARKD_SOCK")" "$SPOOL"
 rm -f "$SHARKD_SOCK"
@@ -51,7 +54,7 @@ if [ "$DUMPCAP_IFACE" != "none" ]; then
 			# shellcheck disable=SC2086
 			dumpcap -i "$DUMPCAP_IFACE" ${DUMPCAP_FILTER:+-f "$DUMPCAP_FILTER"} \
 				-b filesize:"$DUMPCAP_FILESIZE" -b files:"$DUMPCAP_FILES" \
-				-w "$SPOOL/net.pcapng" || true
+				-w "$SPOOL/net.pcapng" 2> "$DUMPCAP_STDERR" || true
 			sleep 2
 		done
 	) &
