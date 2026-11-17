@@ -114,6 +114,8 @@ docker run -d --name webshark -p 8080:8080 \
 
 说明：容器内进程以 root 运行，dumpcap 的抓包能力来自运行时授予的 capabilities，不写入镜像；默认监听 `0.0.0.0` 时必须设置 token，如需免 token 请 `--network host` 并设 `LISTEN=127.0.0.1:8080`。
 
+**抓包怎么给网卡与权限**（host 网络抓宿主网卡 / `container:<名>` 抓另一容器 / bridge 只见自身 / `none` 纯分析、capabilities 与挂载的判据、排障命令）：见 `docs/deployment.md`「Docker 部署与抓包」——网卡不需要挂载，由网络模式决定看见谁、capabilities 决定能不能抓。
+
 ## CLI 参数
 
 | 参数 | 默认值 | 说明 |
