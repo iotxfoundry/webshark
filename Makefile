@@ -15,9 +15,11 @@ ZIP_EPOCH := 202001010000.00
 # 全量构建：前端产物 + 二进制
 all: web build
 
-# 仅 Go 二进制（web/dist.zip 已入库，前端未改时无需 node）
+# 仅 Go 二进制(webshark 服务 + pktdump 串口/CAN 采集; web/dist.zip 已入库,
+# 前端未改时无需 node), 同一 -trimpath 规则
 build:
 	$(GO) build -trimpath -o $(BIN)/webshark ./cmd/webshark
+	$(GO) build -trimpath -o $(BIN)/pktdump ./cmd/pktdump
 
 # 前端构建并打包为 web/dist.zip（入库产物，供 //go:embed 使用）
 web:

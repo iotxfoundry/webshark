@@ -111,6 +111,8 @@ docker run -d --name webshark -p 8080:8080 \
 | `DUMPCAP_FILESIZE` | `8388608` | 单分片字节数 |
 | `DUMPCAP_FILES` | `16` | 分片数（容器内自动与 `-ring` 对齐） |
 | `DUMPCAP_STDERR` | `/dev/null` | dumpcap stderr 去向（其 `\rPackets: N` 进度行在容器日志中会与其他进程日志穿插；调试时设 `/dev/stderr` 或文件路径） |
+| `SERIAL_PORTS` | 空 | 串口采集列表，逗号分隔 `/dev/ttyUSB0@115200,/dev/ttyUSB1@9600`（`@波特率` 缺省 115200，仅用于 Modbus RTU 3.5 字符静默成帧）；空 = 不采串口。部署前提见 [docs/deployment.md](docs/deployment.md)「串口与 CAN」 |
+| `CAN_IFACES` | 空 | SocketCAN 接口名，逗号分隔 `can0,can1`；空 = 不采 CAN。两者都空则 pktdump 整个不起 |
 
 说明：容器内进程以 root 运行，dumpcap 的抓包能力来自运行时授予的 capabilities，不写入镜像；默认监听 `0.0.0.0` 时必须设置 token，如需免 token 请 `--network host` 并设 `LISTEN=127.0.0.1:8080`。
 

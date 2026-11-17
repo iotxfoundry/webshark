@@ -221,6 +221,28 @@ docker logs <容器> 2>&1 | grep -i permission   # 缺 NET_ADMIN/NET_RAW 的典�
 - docker compose 等价：`network_mode: host`、`cap_add: [NET_ADMIN, NET_RAW]`、`volumes:` 与 `environment:` 按 docker run 对应。
 - 远程抓包（`DUMPCAP_IFACE=rpcap://<host>/<iface>`）依赖目标机 rpcapd，且明文传输，内网排查才考虑。
 
+### 串口与 CAN（pktdump）
+
+镜像内的 `pktdump` 在 dumpcap 之外补两类工业总线采集：串口（eBPF 挂内核 tty 层旁听任意进程的串口字节流，Modbus RTU 3.5 字符静默定界，落 LINKTYPE_USER0=147）与 CAN（SocketCAN RAW socket，落 LINKTYPE_CAN_SOCKETCAN=227）。分片与 dumpcap 同写 `SPOOL` 目录（`cap-*.pcapng`），环窗一并可见；`SERIAL_PORTS` 与 `CAN_IFACES` 都为空时 pktdump 整个不起。
+
+| 采什么 | 设备/接口 | capabilities | 宿主前提 |
+|---|---|---|---|
+| 串口（RS-232/485，Modbus RTU） | `--device /dev/ttyUSB0`（多口逗号列出，`@波特率` 逐口指定） | `--cap-add BPF --cap-add PERFMON`（内核 < 5.8 用 `--cap-add SYS_ADMIN`） | 宿主内核 ≥ 5.8 且启用 BTF（CONFIG_DEBUG_INFO_BTF，`ls /sys/kernel/btf/vmlinux` 存在）且未 lockdown BPF；目标架构 amd64/arm64/arm（eBPF 产物已按 GOARCH 入库） |
+| CAN（SocketCAN） | 不挂载设备；宿主先配好比特率并 up：`ip link set can0 type can bitrate 500000 && ip link set can0 up` | `--cap-add NET_RAW` | 宿主内核编 CONFIG_CAN + CONFIG_CAN_RAW |
+
+要点：
+
+- 串口波特率只影响 RTU 成帧的 3.5 字符静默时长（framer t35），不改设备 termios——采集在内核 tty 层旁听，线上业务进程照常独占设备，互不干扰；`@波特率` 填线上真实速率（≤19200 按 3.5×11 位/baud 计算，更高固定 1.75ms）。
+- CAN 比特率归宿主管，容器只建 RAW socket 收帧；经典帧与 CAN FD 帧（`CAN_RAW_FD_FRAMES`）都收。
+- 每源启动探测一次：CAN 接口不存在 / eBPF 装载失败打 WARN 跳过该源（不致命），全部源不可用退出 1 → 守护循环 2s 后重试（适配设备晚就绪）；任一源落盘失败取消其余源整体退出。
+
+真机验收 checklist（**本仓仅验证了编译与本地虚拟链路——vcan/pty 桩，真机未测**，上板前逐项过）：
+
+- [ ] 真实 RS-485 RTU：3.5 字符静默定界时序正确（按线上波特率切帧）、多从站请求/响应混流不串帧、CRC 失败帧仍落盘（`rtu.crcfail=1`）留证据；
+- [ ] 真实 CAN / CAN FD：经典帧与 FD 帧均落盘且 Wireshark SocketCAN dissector 出字段，错误帧可见；
+- [ ] arm64/armhf 目标板：内核 BTF 存在、kprobe 挂点（`n_tty_write` / `n_tty_receive_buf_common`）在 kallsyms 且可挂；
+- [ ] 容器能力授予：BPF/PERFMON（或老内核 SYS_ADMIN）与 NET_RAW 按上表授予，`docker logs` 无 permission/kprobe 报错。
+
 ## token 与 TLS 建议
 
 - **token 生成**：`openssl rand -hex 32`。写入 `/etc/webshark/token`：`WEBSHARK_TOKEN=<值>`，`chmod 600`、归属 `webshark:webshark`。

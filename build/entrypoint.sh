@@ -13,6 +13,21 @@
 #   DUMPCAP_FILESIZE 单分片字节数                        8388608（8MiB）
 #   DUMPCAP_FILES    分片数（webshark -ring 自动对齐此值）16
 #   SHARKD_SOCK      sharkd Unix socket 路径             /run/webshark/sharkd.sock
+#   SERIAL_PORTS     串口采集列表, 逗号分隔
+#                    "/dev/ttyUSB0@115200,/dev/ttyUSB1@9600"（@波特率缺省 115200,
+#                    仅用于 Modbus RTU 3.5 字符静默成帧, 不碰 termios）; 空 = 不采串口
+#   CAN_IFACES       SocketCAN 接口名, 逗号分隔 "can0,can1"; 空 = 不采 CAN
+#                    两者都空则 pktdump 整个不起
+#
+# 串口/CAN 采集(pktdump)部署前提:
+#   - 串口: 设备经 --device 传入(如 --device /dev/ttyUSB0); eBPF 在内核 tty 层旁听
+#     (不占设备, 线上业务进程照常独占), 需 --cap-add BPF --cap-add PERFMON
+#     (内核 < 5.8 用 --cap-add SYS_ADMIN), 宿主内核 ≥ 5.8 且启用 BTF
+#     (CONFIG_DEBUG_INFO_BTF, /sys/kernel/btf/vmlinux 存在)且未 lockdown BPF;
+#   - CAN: 宿主先配好比特率并 up, 容器 --cap-add NET_RAW:
+#     ip link set can0 type can bitrate 500000 && ip link set can0 up
+#   - pktdump 每源启动探测一次: 接口不存在/eBPF 装载失败打 WARN 跳过该源,
+#     全部源不可用退出 1 → 守护循环 2s 后重试(适配设备晚就绪)
 set -eu
 
 SPOOL="${SPOOL:-/var/lib/webshark}"
@@ -25,6 +40,8 @@ DUMPCAP_FILES="${DUMPCAP_FILES:-16}"
 # dumpcap 默认向 stderr 打 \r 进度行（终端用, 在容器日志里与 sharkd 日志穿插成乱行）;
 # 默认静音, 调试时设为 /dev/stderr 或文件路径
 DUMPCAP_STDERR="${DUMPCAP_STDERR:-/dev/null}"
+SERIAL_PORTS="${SERIAL_PORTS:-}"
+CAN_IFACES="${CAN_IFACES:-}"
 
 mkdir -p "$(dirname "$SHARKD_SOCK")" "$SPOOL"
 rm -f "$SHARKD_SOCK"
@@ -55,6 +72,18 @@ if [ "$DUMPCAP_IFACE" != "none" ]; then
 			dumpcap -i "$DUMPCAP_IFACE" ${DUMPCAP_FILTER:+-f "$DUMPCAP_FILTER"} \
 				-b filesize:"$DUMPCAP_FILESIZE" -b files:"$DUMPCAP_FILES" \
 				-w "$SPOOL/net.pcapng" 2> "$DUMPCAP_STDERR" || true
+			sleep 2
+		done
+	) &
+fi
+
+# 串口/CAN 采集: 任一非空即拉起 pktdump(空参数的源在其内部跳过);
+# 崩溃/全部源不可用退出后 2s 自动拉起
+if [ -n "$SERIAL_PORTS" ] || [ -n "$CAN_IFACES" ]; then
+	(
+		while :; do
+			pktdump --spool "$SPOOL" --roll "$DUMPCAP_FILESIZE" --files "$DUMPCAP_FILES" \
+				--serial "$SERIAL_PORTS" --can "$CAN_IFACES" || true
 			sleep 2
 		done
 	) &
