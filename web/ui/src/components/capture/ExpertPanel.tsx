@@ -3,7 +3,7 @@
 // [级别, 分组, 协议, 消息, 帧号], 行点击 → onFrameSelect(n, shard) 由宿主选中该帧并拉详情
 // (分片以 tap 应答为准, 轮换后也可信; 最小实现: 不强求包列表滚动定位——目标帧可能不在
 // 已拉取游标内, 见 CapturePage.onExpertFrame).
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   Badge, Button, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle,
   makeStyles, Spinner, Text, tokens,
@@ -12,7 +12,10 @@ import { Dismiss24Regular } from "@fluentui/react-icons";
 import { Virtuoso } from "react-virtuoso";
 import type { SharkdExpertDetail, SharkdExpertResponse } from "../../api/sharkdTypes";
 import { isTestEnv } from "../../utils/captureTree";
+import { severityKind } from "../../utils/severity";
 import { useMonoStyles } from "../../styles/mono";
+import { hintDrawer } from "../../styles/hint";
+import { useDrawerFetch } from "../../hooks/useDrawerFetch";
 
 const useStyles = makeStyles({
   body: { display: "flex", flexDirection: "column", minHeight: 0, padding: 0 },
@@ -38,19 +41,13 @@ const useStyles = makeStyles({
     ":hover": { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
   rowHead: { cursor: "default" as const, fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground3 },
-  hint: {
-    flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
-    padding: tokens.spacingVerticalXL, color: tokens.colorNeutralForeground3,
-  },
+  hint: hintDrawer,
 });
 
 /** severity → 徽章样式类(Error 红/Warning 黄/Chat 灰/其余中性不染色) */
 function sevClass(s: string): string | undefined {
-  const k = s.toLowerCase();
-  if (k.includes("error")) return "sevError";
-  if (k.includes("warn")) return "sevWarn";
-  if (k.includes("chat")) return "sevChat";
-  return undefined;
+  const k = severityKind(s);
+  return k !== undefined ? { error: "sevError", warn: "sevWarn", chat: "sevChat" }[k] : undefined;
 }
 
 export function ExpertPanel({ fetchExpert, onFrameSelect, onClose }: {
@@ -62,25 +59,7 @@ export function ExpertPanel({ fetchExpert, onFrameSelect, onClose }: {
 }) {
   const styles = useStyles();
   const monoS = useMonoStyles();
-  const [data, setData] = useState<SharkdExpertResponse | null>(null);
-  const [err, setErr] = useState("");
-
-  // 打开即取数; alive 防卸载后 setState(重置放异步头, 避免同步 setState-in-effect 级联渲染)
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      setData(null);
-      setErr("");
-      try {
-        const d = await fetchExpert();
-        if (alive) setData(d);
-      } catch (e) {
-        if (alive) setErr(e instanceof Error ? e.message : String(e));
-      }
-    };
-    void load();
-    return () => { alive = false; };
-  }, [fetchExpert]);
+  const { data, err } = useDrawerFetch(fetchExpert, [fetchExpert]);
 
   // 全部明细(多 tap 展平, 现仅 expert 一项) + 按级别文本分组计数(Error/Warning/Chat/其余)
   const details = useMemo(() => (data?.taps ?? []).flatMap((t) => t.details), [data]);

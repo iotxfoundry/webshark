@@ -11,8 +11,8 @@
 // (Wireshark 三面板数据面) 每流一条 WS → 服务端推送消费(纯推送, 零轮询).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Badge, Button, MessageBar, MessageBarBody, MessageBarTitle, Spinner, Text,
-  makeStyles, mergeClasses, tokens, Tooltip,
+  Badge, Button, MessageBar, MessageBarBody, MessageBarTitle, Spinner, Tab, TabList,
+  Text, makeStyles, mergeClasses, tokens, Tooltip,
 } from "@fluentui/react-components";
 import {
   ArrowDownload24Regular, Chat16Regular, Info16Regular, Key16Regular,
@@ -29,10 +29,11 @@ import { CaptureFilterBar } from "../components/capture/CaptureFilterBar";
 import { CapturePacketList } from "../components/capture/CapturePacketList";
 import { CaptureTreeView } from "../components/capture/CaptureTreeView";
 import { CaptureHexView, type HexMode } from "../components/capture/CaptureHexView";
-import { TabList, Tab } from "@fluentui/react-components";
 import { FollowStreamView } from "../components/capture/FollowStreamView";
 import { ExpertPanel } from "../components/capture/ExpertPanel";
 import { useMonoStyles } from "../styles/mono";
+import { hintPane, hintMuted } from "../styles/hint";
+import { errMsg } from "../api/client";
 
 /** follow 类型映射: f 串协议前缀 → follow type(协议短名大写, sharkd 实测小写被拒 -12001) */
 const FOLLOW_TYPES: Record<string, string> = { tcp: "TCP", udp: "UDP", tls: "TLS", http: "HTTP", http2: "HTTP2", quic: "QUIC" };
@@ -53,7 +54,6 @@ const useStyles = makeStyles({
   bottomSplit: { display: "flex", flex: 1, minHeight: 0, alignItems: "stretch" },
   treePane: { display: "flex", flexDirection: "column", flex: 1, minWidth: "360px", border: `1px solid ${tokens.colorNeutralStroke2}`, borderRadius: tokens.borderRadiusMedium, overflow: "hidden", background: tokens.colorNeutralBackground1 },
   vDivider: { flexShrink: 0, width: "6px", cursor: "col-resize", background: tokens.colorNeutralStroke2, touchAction: "none" as const },
-  vDividerActive: { background: tokens.colorBrandBackground },
   hexPane: { display: "flex", flexDirection: "column", border: `1px solid ${tokens.colorNeutralStroke2}`, borderRadius: tokens.borderRadiusMedium, overflow: "hidden", background: tokens.colorNeutralBackground1, flexShrink: "0" as const },
   hexTabs: {
     selectors: {
@@ -64,14 +64,39 @@ const useStyles = makeStyles({
   // 详情面板常挂内容容器(换帧在途降透明, 旧内容带标记可见不卸载重挂)
   paneBody: { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 },
   dimmed: { opacity: 0.45, transition: "opacity .15s" },
-  parseHint: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: "120px" },
-  paneHint: { padding: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
+  parseHint: { ...hintPane, minHeight: "120px" },
+  paneHint: { padding: tokens.spacingVerticalS, ...hintMuted },
 });
 
 /** 详情区占位(等待实时数据流, 替换上一帧旧字节避免张冠李戴) */
 function PaneHint({ text }: { text: string }) {
   const styles = useStyles();
   return <div className={styles.paneHint}>{text}</div>;
+}
+
+/** 页面私有分割条: 上下(v=包列表高度)/左右(h=字节视图宽度)两条共用同一 pointer 五件套
+ *  (按下捕获/移动/抬起/取消/双击复位), 仅轴向样式、取值函数与复位目标由调用方给出 */
+function SplitDivider({ axis, drag, setDrag, onMove, onReset, title }: {
+  axis: "v" | "h";
+  drag: "v" | "h" | null;
+  setDrag: (d: "v" | "h" | null) => void;
+  onMove: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onReset: () => void;
+  title: string;
+}) {
+  const styles = useStyles();
+  return (
+    <div
+      className={mergeClasses(axis === "v" ? styles.hDivider : styles.vDivider,
+        drag === axis && styles.hDividerActive)}
+      onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); setDrag(axis); }}
+      onPointerMove={onMove}
+      onPointerUp={() => setDrag(null)}
+      onPointerCancel={() => setDrag(null)}
+      onDoubleClick={onReset}
+      title={title}
+    />
+  );
 }
 
 export default function CapturePage({ embedded = false, onOpenToken }: { embedded?: boolean; onOpenToken?: () => void }) {
@@ -138,7 +163,7 @@ export default function CapturePage({ embedded = false, onOpenToken }: { embedde
     } catch (e) {
       if (seq !== detailSeq.current) return;
       setDetail(null);
-      setFrameErr(e instanceof Error ? `帧 ${r.no} 详情失败: ${e.message}` : String(e));
+      setFrameErr(`帧 ${r.no} 详情失败: ${errMsg(e)}`);
     } finally {
       if (seq === detailSeq.current) setFrameLoading(false);
     }
@@ -165,19 +190,18 @@ export default function CapturePage({ embedded = false, onOpenToken }: { embedde
     void onRowSelect(r);
   }, [rows, onRowSelect]);
 
-  // 分割拖动: 上下(topH%) 与 左右(hexW px), pointer capture 复用
-  const onVDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (drag !== "v") return;
-    const rect = rootRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const pct = ((e.clientY - rect.top) / rect.height) * 100;
-    setTopH(Math.min(80, Math.max(15, pct)));
-  }, [drag]);
-  const onHDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (drag !== "h") return;
-    const rect = bottomRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setHexW(Math.min(Math.max(rect.right - e.clientX, 240), Math.max(rect.width - 360, 240)));
+  // 分割拖动: 上下(topH%) 与 左右(hexW px), pointer capture 复用; 拖动期间移动事件只派发给
+  // 持有捕获的分割条, 故按 drag 轴向取值与两处独立 handler 语义等价
+  const onDragMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (drag === "v") {
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setTopH(Math.min(80, Math.max(15, ((e.clientY - rect.top) / rect.height) * 100)));
+    } else if (drag === "h") {
+      const rect = bottomRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setHexW(Math.min(Math.max(rect.right - e.clientX, 240), Math.max(rect.width - 360, 240)));
+    }
   }, [drag]);
 
   // 详情区门控: 连接就绪但尚无数据(首连等待推送/reset 后服务端全量重推重建中)整区占位;
@@ -187,24 +211,16 @@ export default function CapturePage({ embedded = false, onOpenToken }: { embedde
   const waitLabel = paused ? "抓包已暂停" : filter !== "" ? "等待匹配报文…" : "正在等待实时数据流…";
   return (
     <div className={styles.root} ref={rootRef}>
-      {conn === "closed" && (
-        <MessageBar intent="warning">
-          <MessageBarBody>
-            <MessageBarTitle>实时流已断开</MessageBarTitle>
-            连接中断, 自动重连中(续推游标保留, 已有数据不丢)…
-          </MessageBarBody>
+      {/* 顶部横幅: 连接中断 / 控制指令未生效 / 帧详情失败(条件各自独立, 按固定顺序展示) */}
+      {[
+        { when: conn === "closed", title: "实时流已断开", body: "连接中断, 自动重连中(续推游标保留, 已有数据不丢)…" },
+        { when: error !== "", title: "控制指令未生效", body: error },
+        { when: frameErr !== "", title: "帧详情", body: frameErr },
+      ].filter((m) => m.when).map((m) => (
+        <MessageBar key={m.title} intent="warning">
+          <MessageBarBody><MessageBarTitle>{m.title}</MessageBarTitle>{m.body}</MessageBarBody>
         </MessageBar>
-      )}
-      {error !== "" && (
-        <MessageBar intent="warning">
-          <MessageBarBody><MessageBarTitle>控制指令未生效</MessageBarTitle>{error}</MessageBarBody>
-        </MessageBar>
-      )}
-      {frameErr !== "" && (
-        <MessageBar intent="warning">
-          <MessageBarBody><MessageBarTitle>帧详情</MessageBarTitle>{frameErr}</MessageBarBody>
-        </MessageBar>
-      )}
+      ))}
 
       {/* 工具栏: [品牌(嵌入时隐藏)] 状态徽章(sharkd HTTP 探活 / WS 流 / 暂停) + 弹性空隙 +
           操作(专家信息 / 暂停恢复 / 导出 / 主题 / 令牌). sharkd 探活(HTTP)与 WS 连接是两个
@@ -281,15 +297,8 @@ export default function CapturePage({ embedded = false, onOpenToken }: { embedde
             />
           )}
         </div>
-        <div
-          className={mergeClasses(styles.hDivider, drag === "v" && styles.hDividerActive)}
-          onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); setDrag("v"); }}
-          onPointerMove={onVDrag}
-          onPointerUp={() => setDrag(null)}
-          onPointerCancel={() => setDrag(null)}
-          onDoubleClick={() => setTopH(45)}
-          title="拖动调整包列表高度, 双击复位"
-        />
+        <SplitDivider axis="v" drag={drag} setDrag={setDrag} onMove={onDragMove}
+          onReset={() => setTopH(45)} title="拖动调整包列表高度, 双击复位" />
         <div className={styles.bottomSplit} ref={bottomRef}>
           <div className={styles.treePane}>
             <div className={styles.paneHead}>
@@ -326,15 +335,8 @@ export default function CapturePage({ embedded = false, onOpenToken }: { embedde
               </div>
             )}
           </div>
-          <div
-            className={mergeClasses(styles.vDivider, drag === "h" && styles.hDividerActive)}
-            onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); setDrag("h"); }}
-            onPointerMove={onHDrag}
-            onPointerUp={() => setDrag(null)}
-            onPointerCancel={() => setDrag(null)}
-            onDoubleClick={() => setHexW(420)}
-            title="拖动调整字节视图宽度, 双击复位"
-          />
+          <SplitDivider axis="h" drag={drag} setDrag={setDrag} onMove={onDragMove}
+            onReset={() => setHexW(420)} title="拖动调整字节视图宽度, 双击复位" />
           <div className={styles.hexPane} style={{ width: hexW }}>
             <div className={styles.paneHead}>
               <TabList size="small" className={styles.hexTabs} aria-label="字节显示模式" selectedValue={hexMode}

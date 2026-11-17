@@ -16,6 +16,7 @@ import type { SharkdExpertResponse, SharkdFollowResult, SharkdFrameDetail } from
 import { openSharkdTransport, type SharkdConn } from "./sharkdTransport";
 import { createCaptureAggregator, type CaptureAggregator, type CaptureViewRow } from "./captureAggregator";
 import { getTokenVersion, onTokenChange } from "../api/token";
+import { errMsg } from "../api/client";
 
 export function useCaptureStream() {
   const [conn, setConn] = useState<SharkdConn>("connecting");
@@ -83,7 +84,7 @@ export function useCaptureStream() {
     try {
       sendRef.current(line);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errMsg(e));
     }
   }, []);
 
@@ -127,9 +128,8 @@ export function useCaptureStream() {
   }, []);
 
   return {
-    conn, rows, filter, error, setError,
+    conn, rows, filter, error,
     setCapturePaused, applyFilter, fetchFrame, fetchFollow, fetchExpert, checkFilter, complete,
   };
 }
 
-export type { SharkdConn };

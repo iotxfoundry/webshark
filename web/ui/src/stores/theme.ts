@@ -27,7 +27,7 @@ function persist(next: Theme): void {
   try { localStorage.setItem("webshark-theme", next); } catch { /* noop */ }
 }
 
-export const useThemeStore = create<ThemeStore>((set) => ({
+export const useThemeStore = create<ThemeStore>((set, get) => ({
   // 深色工业主题为默认(契约 §6)
   theme: urlTheme === "light" || urlTheme === "dark" ? urlTheme : saved === "light" ? "light" : "dark",
   setTheme: (t) =>
@@ -35,10 +35,5 @@ export const useThemeStore = create<ThemeStore>((set) => ({
       persist(t);
       return { theme: t };
     }),
-  toggle: () =>
-    set((s) => {
-      const next = s.theme === "light" ? "dark" : "light";
-      persist(next);
-      return { theme: next };
-    }),
+  toggle: () => get().setTheme(get().theme === "light" ? "dark" : "light"),
 }));

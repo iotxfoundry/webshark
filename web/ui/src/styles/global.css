@@ -17,11 +17,6 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* 等宽字体：变量名 / 地址 / 代码 / 表格数据 */
-.mono {
-  font-family: "Fira Code", "Cascadia Code", "JetBrains Mono", monospace;
-}
-
 /* 滚动条: 浅色主题为深灰滑块, data-theme=dark 时切换为白色滑块 */
 ::-webkit-scrollbar {
   width: 8px;

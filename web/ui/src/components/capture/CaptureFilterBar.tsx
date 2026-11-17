@@ -4,11 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import { Input, Badge, MessageBar, MessageBarBody, MessageBarTitle, makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
 import { Dismiss16Regular } from "@fluentui/react-icons";
 import type { SharkdCompletion } from "../../api/sharkdTypes";
+import { monoStyle } from "../../styles/mono";
+import { errMsg as toErrMsg } from "../../api/client";
 
 const useStyles = makeStyles({
   root: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS },
   bar: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS },
-  input: { flex: 1, fontFamily: '"Fira Code", "Cascadia Code", "JetBrains Mono", monospace', fontSize: tokens.fontSizeBase200 },
+  input: { flex: 1, fontFamily: monoStyle.fontFamily, fontSize: tokens.fontSizeBase200 },
   valid: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: tokens.colorPaletteGreenForeground1 },
   invalid: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: tokens.colorPaletteRedForeground1 },
   applyBtn: { flexShrink: 0 },
@@ -21,7 +23,7 @@ const useStyles = makeStyles({
   },
   compItem: { padding: `2px ${tokens.spacingHorizontalS}`, fontSize: tokens.fontSizeBase200, cursor: "pointer" as const, display: "flex", gap: tokens.spacingHorizontalS, alignItems: "baseline", background: "transparent" as const, border: "none" as const, textAlign: "left" as const, width: "100%" as const },
   compHover: { ":hover": { backgroundColor: tokens.colorNeutralBackground1Hover } },
-  compName: { fontFamily: '"Fira Code", monospace', overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const },
+  compName: { fontFamily: monoStyle.fontFamily, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const },
   compDesc: { color: tokens.colorNeutralForeground3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const },
 });
 
@@ -71,7 +73,7 @@ export function CaptureFilterBar({ value, onChange, onApply, check, complete, ac
         setCheckState({ state: "valid", msg: r.warning ?? "" });
       } catch (e) {
         if (seq !== checkSeqRef.current) return;
-        setCheckState({ state: "invalid", msg: e instanceof Error ? e.message : String(e) });
+        setCheckState({ state: "invalid", msg: toErrMsg(e) });
       }
     }, 400);
     return () => clearTimeout(t);

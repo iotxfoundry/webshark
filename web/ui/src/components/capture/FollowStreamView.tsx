@@ -4,17 +4,18 @@
 // 方向判定(近似): follow 响应的 payloads 是流内分段序列, 无方向字段——按回合交替近似:
 // 偶数下标视为 C→S(客户端→服务端, 首段), 奇数下标视为 S→C; 未做协议语义重组(如 HTTP
 // 请求/响应按报文边界配对), 纯双工对撞流(如逐字节 echo)下方向标注仅供参考.
-import { useEffect, useState } from "react";
-import {
-  Badge, Button, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle,
+import { Badge, Button, Drawer, DrawerBody, DrawerHeader, DrawerHeaderTitle,
   makeStyles, Spinner, Text, tokens,
 } from "@fluentui/react-components";
 import { Dismiss24Regular } from "@fluentui/react-icons";
 import type { SharkdFollowResult } from "../../api/sharkdTypes";
 import { monoStyle, useMonoStyles } from "../../styles/mono";
+import { hintDrawer } from "../../styles/hint";
+import { useDrawerFetch } from "../../hooks/useDrawerFetch";
 
 /** payload 解码: base64 → utf-8; 非法序列(fatal)回退可打印转义(0x20-0x7e 直出, 其余 \xNN) */
 export function decodeFollowPayload(b64: string): string {
+  // 不复用 decodeBase64 的容错版: 非法 base64 需原样抛出(与历史行为一致, 由调用方 catch)
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -70,14 +71,7 @@ const useStyles = makeStyles({
   // 方向徽章主题 token 成对(背景/前景, 明暗主题均达标): C→S 蓝 / S→C 绿
   c2s: { backgroundColor: tokens.colorPaletteBlueBackground2, color: tokens.colorPaletteBlueForeground2 },
   s2c: { backgroundColor: tokens.colorPaletteGreenBackground2, color: tokens.colorPaletteGreenForeground2 },
-  hint: {
-    flex: 1,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: tokens.spacingVerticalXL,
-    color: tokens.colorNeutralForeground3,
-  },
+  hint: hintDrawer,
 });
 
 export function FollowStreamView({ type, filter, fetchFollow, onClose }: {
@@ -91,25 +85,7 @@ export function FollowStreamView({ type, filter, fetchFollow, onClose }: {
 }) {
   const styles = useStyles();
   const monoS = useMonoStyles();
-  const [data, setData] = useState<SharkdFollowResult | null>(null);
-  const [err, setErr] = useState("");
-
-  // 打开即取数(type/filter 变化重取); alive 防卸载后 setState(重置放异步头, 避免同步 setState-in-effect)
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      setData(null);
-      setErr("");
-      try {
-        const d = await fetchFollow(type, filter);
-        if (alive) setData(d);
-      } catch (e) {
-        if (alive) setErr(e instanceof Error ? e.message : String(e));
-      }
-    };
-    void load();
-    return () => { alive = false; };
-  }, [type, filter, fetchFollow]);
+  const { data, err } = useDrawerFetch(() => fetchFollow(type, filter), [type, filter, fetchFollow]);
 
   return (
     <Drawer open onOpenChange={(_, s) => { if (!s.open) onClose(); }} position="end" size="large">

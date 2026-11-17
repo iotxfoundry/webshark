@@ -4,7 +4,7 @@
 // pcapng 导出下载 + status 探活. WS 上行只剩 _ctl 流控制, 交互查询全部走 HTTP.
 
 import { withBase } from "../base";
-import { ApiError, getJSON, postJSON } from "./client";
+import { getJSON, postJSON } from "./client";
 import { tokenQuery } from "./token";
 import type {
   SharkdCheckWarning, SharkdCompletion, SharkdExpertResponse,
@@ -107,5 +107,3 @@ export async function downloadCaptureAll(): Promise<void> {
   document.body.removeChild(a);
 }
 
-// 供错误断言/类型复用: 校验路径的 envelope 错误统一走 ApiError(契约 §1)
-export { ApiError };

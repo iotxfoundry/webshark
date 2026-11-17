@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { Button, Input, makeStyles, tokens } from "@fluentui/react-components";
 import { setToken } from "../api/token";
+import { monoStyle } from "../styles/mono";
 
 const useStyles = makeStyles({
   root: {
@@ -21,7 +22,7 @@ const useStyles = makeStyles({
   title: { fontSize: tokens.fontSizeBase500, fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground1 },
   desc: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase300, lineHeight: "1.5" },
   row: { display: "flex", gap: tokens.spacingHorizontalS },
-  input: { flex: 1, fontFamily: '"Fira Code", monospace' },
+  input: { flex: 1, fontFamily: monoStyle.fontFamily },
 });
 
 export default function TokenGate() {

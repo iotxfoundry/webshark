@@ -6,10 +6,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, screen } from "@testing-library/react";
 import { FluentProvider, webDarkTheme } from "@fluentui/react-components";
-import { render } from "../test/test-utils";
+import { render } from "@testing-library/react";
 import CapturePage from "./CapturePage";
 import { downloadCaptureAll } from "../api/capture";
 import { setToken } from "../api/token";
+import { MockWebSocket, installMockWebSocket } from "../test/mockWebSocket";
 import type { CaptureRowWire } from "../hooks/captureAggregator";
 
 // downloadCaptureAll mock(jsdom 锚点点击导航未实现, 直接断言调用)
@@ -18,28 +19,6 @@ vi.mock("../api/capture", async (importOriginal) => {
   return { ...orig, downloadCaptureAll: vi.fn() };
 });
 const mockedDownload = vi.mocked(downloadCaptureAll);
-
-/** 极简 mock WebSocket(形态同 useCaptureStream.test) */
-class MockWebSocket {
-  static instances: MockWebSocket[] = [];
-  static CONNECTING = 0;
-  static OPEN = 1;
-  static CLOSING = 2;
-  static CLOSED = 3;
-  readyState = MockWebSocket.CONNECTING;
-  sent: string[] = [];
-  onopen: (() => void) | null = null;
-  onclose: (() => void) | null = null;
-  onmessage: ((e: { data: string }) => void) | null = null;
-  binaryType = "";
-  constructor(public url: string) { MockWebSocket.instances.push(this); }
-  send(line: string): void { this.sent.push(line); }
-  close(): void { this.readyState = MockWebSocket.CLOSED; this.onclose?.(); }
-  open(): void { this.readyState = MockWebSocket.OPEN; this.onopen?.(); }
-  push(...events: unknown[]): void {
-    this.onmessage?.({ data: events.map((e) => JSON.stringify(e)).join("\n") });
-  }
-}
 
 /** rpcRequests: 上行 JSON-RPC 请求数(live 模式只认 _ctl, 轮询退役断言用) */
 function rpcRequests(ws: MockWebSocket): Record<string, unknown>[] {
@@ -51,7 +30,7 @@ function wire(num: number, shard = "a.pcapng"): CaptureRowWire {
 }
 
 describe("CapturePage", () => {
-  let origWS: typeof WebSocket;
+  let restoreWS: () => void;
   /** frame HTTP 端点应答(status!=200 时 body 为错误文本) */
   let frameReply: { status: number; body: unknown };
   /** frame 挂起门(换帧常挂用例: 置 Promise 延缓应答, 释放后继续) */
@@ -63,9 +42,7 @@ describe("CapturePage", () => {
   let statusReply: { connected: boolean; files: { name: string; size: number; mtime: string }[]; reason?: string };
   beforeEach(() => {
     vi.useFakeTimers();
-    origWS = window.WebSocket;
-    Object.defineProperty(window, "WebSocket", { value: MockWebSocket, configurable: true, writable: true });
-    MockWebSocket.instances = [];
+    restoreWS = installMockWebSocket();
     mockedDownload.mockReset();
     frameReply = { status: 200, body: { tree: [{ l: "Ethernet II" }], bytes: "AAE=" } };
     frameHold = null;
@@ -101,7 +78,7 @@ describe("CapturePage", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
-    Object.defineProperty(window, "WebSocket", { value: origWS, configurable: true, writable: true });
+    restoreWS();
     // act 包裹: 清理期 setToken 触发 hook 内 token 订阅 setState(RTL cleanup 在其后运行)
     act(() => { setToken(""); });
   });

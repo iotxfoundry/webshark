@@ -9,6 +9,7 @@ import { Virtuoso } from "react-virtuoso";
 import { Button, makeStyles, mergeClasses, tokens, Tooltip } from "@fluentui/react-components";
 import { Filter16Regular, ChevronRight16Regular, ChevronDown16Regular } from "@fluentui/react-icons";
 import { flattenTree, topLevelKeys, isTestEnv, type TreeRow } from "../../utils/captureTree";
+import { severityKind } from "../../utils/severity";
 import type { SharkdTreeNode } from "../../api/sharkdTypes";
 import { useMonoStyles } from "../../styles/mono";
 
@@ -65,7 +66,7 @@ export function CaptureTreeView({ tree, selected, onNodeSelect, onFilter }: {
 
   const renderRow = useCallback((row: TreeRow) => {
     const n = row.node;
-    const sev = n.s;
+    const sevK = n.s !== undefined ? severityKind(n.s) : undefined;
     const isOpen = !collapsed.has(row.key);
     return (
       <div
@@ -80,7 +81,7 @@ export function CaptureTreeView({ tree, selected, onNodeSelect, onFilter }: {
         <span className={styles.caret} onClick={(e) => { e.stopPropagation(); if (row.hasChildren) toggle(row.key); }}>
           {row.hasChildren ? (isOpen ? <ChevronDown16Regular /> : <ChevronRight16Regular />) : null}
         </span>
-        <span className={mergeClasses(styles.label, monoS.mono, sev && (sev.toLowerCase().includes("error") ? styles.sevError : sev.toLowerCase().includes("warn") ? styles.sevWarn : undefined))}>
+        <span className={mergeClasses(styles.label, monoS.mono, sevK === "error" ? styles.sevError : sevK === "warn" ? styles.sevWarn : undefined)}>
           {n.l}
         </span>
         {n.f && (

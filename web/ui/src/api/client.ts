@@ -12,6 +12,11 @@ export class ApiError extends Error {
   }
 }
 
+/** 任意抛出值 → 展示文案(Error 取 message, 其余 String 化; catch 分支统一转文案用) */
+export function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 /** 401 全局处理: 清 token; App 订阅该事件切到 token 录入页 */
 let onUnauthorized: (() => void) | null = null;
 export function setUnauthorizedHandler(fn: () => void): void {
