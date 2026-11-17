@@ -17,6 +17,10 @@
 #                    "/dev/ttyUSB0@115200,/dev/ttyUSB1@9600"（@波特率缺省 115200,
 #                    仅用于 3.5 字符静默成帧时序, 不碰 termios）; 空 = 不采串口
 #                    协议无关采集, 深度解析由 sharkd 侧 Lua 分发器完成
+#   SERIAL_FT12      FT1.2 链回的内建 dissector: 101|103（默认 101）。
+#                    IEC 60870-5-101/103 链路帧形态相同, 仅 ASDU 语义不同,
+#                    挂 101 表计留默认, 挂 103 保护装置设 103; 仅
+#                    SERIAL_PORTS 非空时生效（非法值启动即报错退出）
 #   CAN_IFACES       SocketCAN 接口名, 逗号分隔 "can0,can1"; 空 = 不采 CAN
 #                    两者都空则 pktdump 整个不起
 #
@@ -86,8 +90,16 @@ if [ -n "$SERIAL_PORTS" ]; then
 	# 实证它是 sharkd 把 USER0(LINKTYPE 147) 帧交给 Lua 分发器 webshark_serial 的
 	# 触发条件, 缺行则 USER0 帧出不来协议树。
 	mkdir -p "$HOME/.config/wireshark" "$HOME/.config/wireshark/plugins"
-	cp /usr/local/share/webshark/webshark_serial.lua \
-		"$HOME/.config/wireshark/plugins/webshark_serial.lua"
+	# FT1.2 内建 dissector 按 SERIAL_FT12 注入: 替换 lua 里的 __FT12_DISSECTOR__
+	# 占位（dissector 名无 sed 元字符, 直接内插安全）; 占位未替换时插件加载失败,
+	# 属装配错误, 不静默兜底。
+	case "${SERIAL_FT12:-101}" in
+	101) ft12dis=iec60870_101 ;;
+	103) ft12dis=iec60870_5_103 ;;
+	*) echo "entrypoint: SERIAL_FT12 仅支持 101|103, 得到 '${SERIAL_FT12}'" >&2; exit 1 ;;
+	esac
+	sed "s/__FT12_DISSECTOR__/$ft12dis/" /usr/local/share/webshark/webshark_serial.lua \
+		> "$HOME/.config/wireshark/plugins/webshark_serial.lua"
 	printf '%s\n' '"User 0 (DLT=147)","webshark_serial","","0","",0' \
 		> "$HOME/.config/wireshark/user_dlts"
 fi

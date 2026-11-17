@@ -230,11 +230,13 @@ docker logs <容器> 2>&1 | grep -i permission   # 缺 NET_ADMIN/NET_RAW 的典�
 | 协议 | 解析位置 | 深度 |
 |---|---|---|
 | Modbus RTU | 内建 dissector `mbrtu`（Lua 分发器 CRC16 校验通过后链回） | 完整字段树（功能码/寄存器/异常码） |
-| FT1.2（IEC 60870-5-101/102/103 链路层） | Lua 树级解析（固定帧/可变帧结构 + 校验和判定） | 帧结构字段；校验错树上标 `(错)` 不丢帧 |
-| DL/T 645-2007 | Lua 树级解析（地址/控制码/数据/校验和） | 帧结构字段；校验错标 `(错)` 不丢帧 |
-| DL/T 698.45 | 无专用解析，落通用帧 | hex 字节视图（帧形与 FT1.2 可变帧同构时呈现为 FT1.2 树，结构与校验算法等价） |
+| FT1.2（IEC 60870-5-101/103） | Lua 分发器形态识别后整帧链回内建 dissector，由 `SERIAL_FT12`（`101`/`103`，默认 `101`）选择按 101 还是 103 解析 | 101/103 链路帧形态相同（起始 10/68、L、C、A、CS、16），仅 ASDU 语义不同 |
+| DL/T 645-2007 | Lua 树级解析（地址/控制码/数据标识 DI/数据区还原/校验和） | 控制码拆方向/从动/后续/功能码（读数据 0x11、读后续 0x12、写数据 0x14 等）；数据区 -0x33 还原 + BCD→数值 + 量纲（常用 DI 子集：组合有功总电能 9010、正有功总电能 9011、正有功费率电能 010101xx、相电压 020101xx、相电流 030101xx、日期时间 9001 等约 20 条）；未知 DI 显示 `DI=xxxxxxxx (BCD 原值)`；校验错标 `(错)` 不丢帧 |
+| DL/T 698.45 | Lua 链路层骨架树（`68 H L(2B 小端) SA CA SA_D CA_D APDU CS1 CS2 16`） | H 控制域逐位（方向/存在 PC/功能码高低位）、L、SA/CA/SA_D/CA_D、APDU 原始字节（A-XDR 未解）、CS1（68..CA_D）/CS2（H..APDU）校验标记，错标 `(错)` 不丢帧 |
 
-深度解析依赖 sharkd 编入 Lua 5.4 支持（Debian wireshark-common 4.6.9 实证具备）。分发器按帧结构特征逐级嗅探（FT1.2 → DL/T 645 → Modbus CRC → 兜底通用帧），多协议多口乃至单口混流均可解析，识别不中不丢帧。
+DL/T 645 数据标识映射取常用子集，移植自社区开源解析表：[lua-dlt645](https://github.com/srdgame/lua-dlt645)（MIT 许可，DI 解码/服务码表）与 [600888/dlt645](https://github.com/600888/dlt645)（Apache-2.0 许可，DI→名称/量纲映射），按本仓帧结构外壳重写。
+
+深度解析依赖 sharkd 编入 Lua 5.4 支持（Debian wireshark-common 4.6.9 实证具备）。分发器按帧结构特征逐级嗅探（FT1.2 → DL/T 645 → DL/T 698.45 → Modbus CRC → 兜底通用帧），多协议多口乃至单口混流均可解析，识别不中不丢帧。
 
 | 采什么 | 设备/接口 | capabilities | 宿主前提 |
 |---|---|---|---|
@@ -251,7 +253,7 @@ docker logs <容器> 2>&1 | grep -i permission   # 缺 NET_ADMIN/NET_RAW 的典�
 真机验收 checklist（**本仓仅验证了编译与本地虚拟链路——vcan/pty 桩，真机未测**，上板前逐项过）：
 
 - [ ] 真实 RS-485：3.5 字符静默成帧时序正确（按线上波特率切帧）、多从站请求/响应混流帧序完整、坏帧（撕裂/校验错）不丢落盘留证据；
-- [ ] 多协议混接：多口分别跑 Modbus RTU / FT1.2（IEC 101/102/103）/ DL/T 645，乃至单口混流——Modbus 帧出 `mbrtu` 完整字段树，FT1.2/645 出树级结构与校验和判定（错帧标 `(错)` 仍呈现），识别不中的帧落通用帧 hex；USER0 帧若全部无协议树，先查 `user_dlts` 与插件是否装进 sharkd 配置目录（entrypoint 随 `SERIAL_PORTS` 自动装配）；
+- [ ] 多协议混接：多口分别跑 Modbus RTU / FT1.2（IEC 101/103，按 `SERIAL_FT12` 选解析）/ DL/T 645 / DL/T 698.45，乃至单口混流——Modbus 帧出 `mbrtu` 完整字段树，FT1.2 出内建 101/103 协议树，645 出控制码/DI/BCD 数据树，698 出链路层骨架树（各协议错帧标 `(错)` 仍呈现），识别不中的帧落通用帧 hex；USER0 帧若全部无协议树，先查 `user_dlts` 与插件是否装进 sharkd 配置目录（entrypoint 随 `SERIAL_PORTS` 自动装配）；
 - [ ] 真实 CAN / CAN FD：经典帧与 FD 帧均落盘且 Wireshark SocketCAN dissector 出字段，错误帧可见；
 - [ ] arm64/armhf 目标板：内核 BTF 存在、kprobe 挂点（`n_tty_write` / `n_tty_receive_buf_common`）在 kallsyms 且可挂；
 - [ ] 容器能力授予：BPF/PERFMON（或老内核 SYS_ADMIN）与 NET_RAW 按上表授予，`docker logs` 无 permission/kprobe 报错。
