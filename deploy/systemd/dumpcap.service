@@ -1,26 +1,17 @@
-# dumpcap：环形抓包写 webshark spool 分片目录
-# 与 sharkd/webshark 同一用户运行：同一用户写/读 spool，避免 0600 分片
-# 属主隔离导致 sharkd/webshark 读不到。抓包权限来自发行版赋予二进制的
-# filecap（cap_net_admin,cap_net_raw），与运行用户无关，无权限提升。
-# 若必须分离用户：0600 捕获文件默认不可被其他用户读取，需额外 ACL 或
-# 轮转后 chmod，本仓不提供，见 docs/deployment.md。
-# -b files:16 必须与 webshark -ring 16 对齐。
 [Unit]
-Description=dumpcap ring capture into webshark spool
+Description=dumpcap 网络采集器(可选, 有线网卡 → webshark spool)
 After=network.target
-Before=webshark.service
 
 [Service]
 User=webshark
-ExecStart=/usr/bin/dumpcap -i eth0 -b filesize:8388608 -b files:16 -w /var/lib/webshark/net.pcapng
+Group=webshark
+EnvironmentFile=-/opt/webshark/webshark.env
+# 网络抓包需 NET_ADMIN+NET_RAW(Ambient 授予, 兜底 apt 包自带的 filecap)
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+ExecStart=/usr/bin/dumpcap -i ${NETWORK_IFACE} -b filesize:8388608 -b files:16 -w /opt/webshark/spool/net.pcapng
 Restart=always
-RestartSec=3
-
-# 仅需抓包与写 spool，收紧其余权限（dumpcap 需要原始能力，NoNewPrivileges 不设 yes）
-ProtectSystem=strict
-ReadWritePaths=/var/lib/webshark
-ProtectHome=yes
-PrivateTmp=yes
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
