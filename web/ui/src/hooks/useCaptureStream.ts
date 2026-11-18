@@ -18,17 +18,17 @@ import { createCaptureAggregator, type CaptureAggregator, type CaptureViewRow } 
 import { getTokenVersion, onTokenChange } from "../api/token";
 import { errMsg } from "../api/client";
 
-export function useCaptureStream() {
+export function useCaptureStream(initialFilter?: string) {
   const [conn, setConn] = useState<SharkdConn>("connecting");
   const [rows, setRows] = useState<CaptureViewRow[]>([]);
-  /** 当前生效筛选(空串 = 普通实时流) */
-  const [filter, setFilter] = useState("");
+  /** 当前生效筛选(空串 = 普通实时流); 初值承接 URL/localStorage 还原, open 后断言链自动上行 */
+  const [filter, setFilter] = useState(initialFilter ?? "");
   const [error, setError] = useState("");
 
   const agg = useMemo<CaptureAggregator>(() => createCaptureAggregator(), []);
   const connRef = useRef(conn);
   useEffect(() => { connRef.current = conn; }, [conn]);
-  const filterRef = useRef("");
+  const filterRef = useRef(initialFilter ?? "");
   useEffect(() => { filterRef.current = filter; }, [filter]);
   /** 连接就绪后由 transport 注入的上行通道(_ctl 专用) */
   const sendRef = useRef<((line: string) => void) | null>(null);

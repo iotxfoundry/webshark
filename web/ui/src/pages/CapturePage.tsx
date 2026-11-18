@@ -123,7 +123,7 @@ export default function CapturePage({ embedded = false, onOpenToken }: { embedde
   const rootRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const session = useCaptureStream();
+  const session = useCaptureStream(initialFilter());
   const { conn, rows, filter, error, setCapturePaused, applyFilter,
     fetchFrame, fetchFollow, fetchExpert, checkFilter, complete } = session;
 
@@ -150,14 +150,11 @@ export default function CapturePage({ embedded = false, onOpenToken }: { embedde
     setSelRow(null); setSelNode(undefined); setDetail(null);
   }, [applyFilter]);
 
-  // 初始还原 + 宿主注入(webshark:set-filter): 两者都汇入 onApplyFilter 单通道;
-  // applyFilter 未连接仅存态、连接后重断言, 故挂载即应用安全. 初始为空不发请求.
+  // 宿主注入(webshark:set-filter)汇入 onApplyFilter 单通道; 初始还原不走 effect——
+  // initialFilter 已下沉为 hook 惰性初值, open 后断言链自动上行(规避 effect 内 setState)
   useEffect(() => {
-    const f0 = filterInput;
-    if (f0 !== "") onApplyFilter(f0);
     setFilterHandler((f) => onApplyFilter(f));
     return () => setFilterHandler(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- filterInput 仅取初始种子(经 useState 惰性初始化)
   }, [onApplyFilter]);
 
   // 行选择: frame 详情(树+hex), 查询键 = 行内隐藏复合键 ref(分片名+帧号, HTTP 按复合键路由).
