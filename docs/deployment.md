@@ -289,9 +289,10 @@ CGO_ENABLED=0 交叉编译的静态 ELF（`GOOS=linux GOARCH=arm64`）。
 ├── bin/{webshark,pktdump,compat-probe}   交叉编译产物
 ├── sharkd46/                             Lua 启用的 sharkd 4.6.9（PPA noble 构建）
 │   ├── sharkd  lib/  share/  init.lua    （Debian 官方构建禁用 sharkd 的 Lua 初始化，不可用）
+├── .local/lib/wireshark/plugins/         sharkd 个人 Lua 目录(setup-lua.sh 部署产物, 自动扫描)
 ├── lua/
 │   ├── init.lua                          Lua 主入口(系统 init.lua 仅一行 bootstrap 指向此文件)
-│   └── webshark_serial.lua               USER0 逐帧嗅探分发器
+│   └── webshark_serial.lua               USER0 逐帧嗅探分发器(源)
 ├── env                                   systemd EnvironmentFile（令牌/串口/CAN）
 └── spool/                                分片环窗
 ```
@@ -376,6 +377,19 @@ RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
+```
+
+**`/opt/webshark/setup-lua.sh`**（sharkd.service ExecStartPre 调用；替换占位并复制到个人插件目录）
+
+```sh
+#!/bin/sh
+# Lua 分发器部署: 替换占位并复制到 sharkd 个人插件目录(HOME=/opt/webshark
+# → /opt/webshark/.local/lib/wireshark/plugins, Wireshark 自动扫描的唯一 Lua 目录)
+# FT1.2 链回固定内建 iec60870_101(如需按 103 解析, 改下行 D= 即可)
+set -e
+PLUGDIR="${HOME}/.local/lib/wireshark/plugins"
+mkdir -p "$PLUGDIR"
+sed "s/__FT12_DISSECTOR__/iec60870_101/" /opt/webshark/lua/webshark_serial.lua > "$PLUGDIR/webshark_serial.lua"
 ```
 
 **`/opt/webshark/env`**（EnvironmentFile；令牌部署时替换）

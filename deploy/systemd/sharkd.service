@@ -1,5 +1,5 @@
 [Unit]
-Description=sharkd (Wireshark 4.6.9 PPA, Lua 启用) for webshark
+Description=sharkd (Wireshark 4.6.9 PPA) for webshark
 After=network.target
 
 [Service]
@@ -7,7 +7,7 @@ User=webshark
 Group=webshark
 Environment=HOME=/opt/webshark
 EnvironmentFile=-/opt/webshark/webshark.env
-ExecStart=/opt/webshark/sharkd46/sharkd46.sh /run/webshark/sharkd.sock
+ExecStart=/opt/webshark/bin/sharkd -a unix:/run/webshark/sharkd.sock --foreground
 RuntimeDirectory=webshark
 RuntimeDirectoryMode=0755
 Restart=always
