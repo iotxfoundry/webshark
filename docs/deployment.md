@@ -253,7 +253,7 @@ DL/T 645 数据标识映射取常用子集，移植自社区开源解析表：[l
 真机验收 checklist（**本仓仅验证了编译与本地虚拟链路——vcan/pty 桩，真机未测**，上板前逐项过）：
 
 - [ ] 真实 RS-485：3.5 字符静默成帧时序正确（按线上波特率切帧）、多从站请求/响应混流帧序完整、坏帧（撕裂/校验错）不丢落盘留证据；
-- [ ] 多协议混接：多口分别跑 Modbus RTU / FT1.2（IEC 101，103 需改分发器一行）/ DL/T 645 / DL/T 698.45，乃至单口混流——Modbus 帧出 `mbrtu` 完整字段树，FT1.2 出内建 101/103 协议树，645 出控制码/DI/BCD 数据树，698 出链路层骨架树（各协议错帧标 `(错)` 仍呈现），识别不中的帧落通用帧 hex；USER0 帧若全部无协议树，先查 Lua 分发器部署（板上 `/opt/webshark/.local/lib/wireshark/plugins/webshark_serial.lua`，setup-lua.sh 自动装配）；
+- [ ] 多协议混接：多口分别跑 Modbus RTU / FT1.2（IEC 101，103 需改分发器一行）/ DL/T 645 / DL/T 698.45，乃至单口混流——Modbus 帧出 `mbrtu` 完整字段树，FT1.2 出内建 101/103 协议树，645 出控制码/DI/BCD 数据树，698 出链路层骨架树（各协议错帧标 `(错)` 仍呈现），识别不中的帧落通用帧 hex；USER0 帧若全部无协议树，先查 Lua 分发器加载链（`/usr/share/wireshark/init.lua` → `/opt/webshark/lua/`，setup-lua.sh 于 sharkd 启动前自动装配）；
 - [ ] 真实 CAN / CAN FD：经典帧与 FD 帧均落盘且 Wireshark SocketCAN dissector 出字段，错误帧可见；
 - [ ] arm64/armhf 目标板：内核 BTF 存在、kprobe 挂点（`n_tty_write` / `n_tty_receive_buf_common`）在 kallsyms 且可挂；
 - [ ] 容器能力授予：BPF/PERFMON（或老内核 SYS_ADMIN）与 NET_RAW 按上表授予，`docker logs` 无 permission/kprobe 报错。
@@ -286,24 +286,31 @@ CGO_ENABLED=0 交叉编译的静态 ELF（`GOOS=linux GOARCH=arm64`）。
 
 ```
 /opt/webshark/
-├── bin/{webshark,pktdump,compat-probe}   交叉编译产物
-├── sharkd46/                             Lua 启用的 sharkd 4.6.9（PPA noble 构建）
-│   ├── sharkd  lib/  share/  init.lua    （Debian 官方构建禁用 sharkd 的 Lua 初始化，不可用）
-├── .local/lib/wireshark/plugins/         sharkd 个人 Lua 目录(setup-lua.sh 部署产物, 自动扫描)
+├── bin/
+│   ├── webshark                           服务(HTTP/WS + SPA)
+│   ├── pktdump                            串口/CAN 采集器
+│   └── sharkd                             sharkd 4.6.9(PPA noble 构建, Lua 启用)
+├── lib/                                   sharkd 运行库树(libwireshark/libwiretap/libwsutil/libgcrypt…)
 ├── lua/
-│   ├── init.lua                          Lua 主入口(系统 init.lua 仅一行 bootstrap 指向此文件)
-│   └── webshark_serial.lua               USER0 逐帧嗅探分发器(源)
-├── env                                   systemd EnvironmentFile（令牌/串口/CAN）
-└── spool/                                分片环窗
+│   ├── init.lua                           Lua 主入口(系统 init.lua 仅一行 bootstrap 指向此文件)
+│   └── webshark_serial.lua                USER0 逐帧嗅探分发器(FT1.2 链回内建 iec60870_101)
+├── usr/share/wireshark/init.lua           系统数据目录的一行 bootstrap(dofile 指向 lua/init.lua)
+├── webshark.env                           systemd EnvironmentFile(令牌/串口/CAN/网卡)
+└── spool/                                 分片环窗(dumpcap net_* + pktdump cap-* 混排)
 ```
 
-**sharkd 4.6.9 套件来源（关键）**：Debian 官方 wireshark 包的 sharkd 禁用了
-Lua 初始化（编译期含 Lua 但运行时不加载任何用户脚本，strace 实证零 .lua
-打开）——必须用 **PPA wireshark-dev/stable 的 noble arm64 构建**（Lua 启用，
-与 x86 宿主同源），或自编译。该构建的 sharkd 以**二进制所在目录**为数据/
-配置根：`lib/`（库树）、`share/`（数据）、`init.lua`（**一行 bootstrap**，
-`dofile("/opt/webshark/lua/init.lua")` 指向 /opt/webshark 下的 Lua 主入口——
-全部 Lua 配置由此收敛于 /opt/webshark/lua/，系统目录零配置）。
+**sharkd 构建来源（关键）**：Debian 官方 wireshark 包的 sharkd 禁用了 Lua
+初始化（编译期含 Lua 但运行时不加载任何用户脚本，strace 实证零 .lua 打开）
+——必须用 **PPA wireshark-dev/stable 的 noble 构建**（Lua 启用，与 x86 宿主
+同源），或自编译。该构建的 sharkd 以**二进制所在目录**为数据/配置根：
+`lib/`（库树）、`init.lua`（**一行 bootstrap**，`dofile("/opt/webshark/lua/init.lua")`
+指向 /opt/webshark 下的 Lua 主入口——全部 Lua 配置由此收敛于 /opt/webshark/lua/，
+系统目录零配置）、`plugins/4.6/`（C 插件扫描目录）。
+
+注意：PPA 构建的库树与数据文件随 deb 安装在 `/usr/lib/aarch64-linux-gnu/`
+与 `/usr/share/wireshark/`（系统路径）；板载部署将其收敛进 `/opt/webshark/sharkd/`
+自包含目录，运行库经 `/etc/ld.so.conf.d/webshark.conf` 注册 + `ldconfig` 生效，
+数据目录按程序目录解析（strace 实证），二者兼容。
 
 systemd 单元与脚本（与设备 `/etc/systemd/system/`、`/opt/webshark/` 逐字一致）：
 
@@ -319,7 +326,7 @@ User=webshark
 Group=webshark
 Environment=HOME=/opt/webshark
 EnvironmentFile=-/opt/webshark/webshark.env
-ExecStart=/opt/webshark/sharkd46/sharkd46.sh /run/webshark/sharkd.sock
+ExecStart=/opt/webshark/bin/sharkd -a unix:/run/webshark/sharkd.sock --foreground
 RuntimeDirectory=webshark
 RuntimeDirectoryMode=0755
 Restart=always
@@ -328,6 +335,9 @@ RestartSec=2
 [Install]
 WantedBy=multi-user.target
 ```
+
+> 实际部署的 ExecStart 直启二进制（无 wrapper）：
+> `ExecStart=/opt/webshark/bin/sharkd -a unix:/run/webshark/sharkd.sock --foreground`
 
 **`/etc/systemd/system/pktdump.service`**
 
@@ -377,19 +387,6 @@ RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
-```
-
-**`/opt/webshark/setup-lua.sh`**（sharkd.service ExecStartPre 调用；替换占位并复制到个人插件目录）
-
-```sh
-#!/bin/sh
-# Lua 分发器部署: 替换占位并复制到 sharkd 个人插件目录(HOME=/opt/webshark
-# → /opt/webshark/.local/lib/wireshark/plugins, Wireshark 自动扫描的唯一 Lua 目录)
-# FT1.2 链回固定内建 iec60870_101(如需按 103 解析, 改下行 D= 即可)
-set -e
-PLUGDIR="${HOME}/.local/lib/wireshark/plugins"
-mkdir -p "$PLUGDIR"
-sed "s/__FT12_DISSECTOR__/iec60870_101/" /opt/webshark/lua/webshark_serial.lua > "$PLUGDIR/webshark_serial.lua"
 ```
 
 **`/opt/webshark/env`**（EnvironmentFile；令牌部署时替换）
