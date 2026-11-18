@@ -19,8 +19,13 @@ type LinkType uint16
 // 落盘链路类型常量(libpcap LINKTYPE 值域): 接口由 daemon 按帧携带的链路类型
 // 懒声明, 无需配置.
 const (
-	// LinkTypeUser0 LINKTYPE_USER0(147): 公司自定义链路类型(串口等私有帧落盘用).
+	// LinkTypeUser0..3 LINKTYPE_USER0..3(147..150): 串口多协议映射
+	// (modbus→USER0[sharkd user_dlts→mbrtu 深解], ft12→USER1[→iec60870_101/103],
+	//  645/698/自定义→USER2/3[无内建 dissector, webshark Go 层生成协议树])
 	LinkTypeUser0 = LinkType(147)
+	LinkTypeUser1 = LinkType(148)
+	LinkTypeUser2 = LinkType(149)
+	LinkTypeUser3 = LinkType(150)
 	// LinkTypeSocketCAN LINKTYPE_CAN_SOCKETCAN(227): SocketCAN 帧, Wireshark
 	// 内建 dissector 深解析.
 	LinkTypeSocketCAN = LinkType(227)

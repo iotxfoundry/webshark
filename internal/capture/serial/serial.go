@@ -72,10 +72,11 @@ const (
 // SerialSource 串口 eBPF 采集源：一实例服务一组 tty 名（tty->name，如 ttyUSB0），
 // 每口 TX/RX 各一个 Framer 静默成帧，切出的字节帧转 capture.Frame 推给调用方。
 type SerialSource struct {
-	names   []string
-	baud    int
-	ifaceID uint16 // 帧携带的采集接口号（调用方分配，0 保留未知）
-	log     *slog.Logger
+	names    []string
+	baud     int
+	ifaceID  uint16           // 帧携带的采集接口号（调用方分配，0 保留未知）
+	linkType capture.LinkType // 帧盖章链路类型（协议→USERn 映射，调用方决定）
+	log      *slog.Logger
 
 	mu    sync.Mutex
 	objs  *bpfObjects
@@ -95,11 +96,11 @@ type framerPair struct {
 // NewSerialSource 新建串口源。构造只记配置，能力探测在 Start 做（失败返回
 // *capture.ErrSourceUnavailable 并记一条 WARN）。ifaceID 为帧携带的采集接口号
 // （调用方分配，0 保留未知）；log 为 nil 时用 slog.Default()。
-func NewSerialSource(names []string, baud int, ifaceID uint16, log *slog.Logger) *SerialSource {
+func NewSerialSource(names []string, baud int, ifaceID uint16, linkType capture.LinkType, log *slog.Logger) *SerialSource {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &SerialSource{names: names, baud: baud, ifaceID: ifaceID, log: log}
+	return &SerialSource{names: names, baud: baud, ifaceID: ifaceID, linkType: linkType, log: log}
 }
 
 // Name 源标识。
@@ -251,7 +252,7 @@ func (s *SerialSource) feed(name string, dir capture.Direction, data []byte, now
 			return NewFramer(FramerConfig{Baud: s.baud, Dir: d, OnFrame: func(fr Frame) {
 				push(capture.Frame{
 					IfaceID:   s.ifaceID,
-					LinkType:  capture.LinkTypeUser0,
+					LinkType:  s.linkType,
 					Direction: fr.Dir,
 					TS:        fr.TS,
 					Data:      fr.Data,

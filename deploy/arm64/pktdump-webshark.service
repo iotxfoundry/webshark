@@ -1,0 +1,24 @@
+[Unit]
+Description=webshark 串口/CAN 采集器 (pktdump)
+After=network.target
+
+[Service]
+User=webshark
+Group=webshark
+SupplementaryGroups=dialout
+Environment=HOME=/opt/webshark
+EnvironmentFile=-/opt/webshark/env
+# CAN RAW 需 NET_RAW; 串口 eBPF 旁听需 BPF+PERFMON(内核>=5.8; 更老内核改 CAP_SYS_ADMIN)
+AmbientCapabilities=CAP_NET_RAW CAP_BPF CAP_PERFMON
+CapabilityBoundingSet=CAP_NET_RAW CAP_BPF CAP_PERFMON
+# CAN 比特率按实际总线调整; 两源都留空则本服务空转不启动
+ExecStartPre=+/sbin/ip link set can0 down
+ExecStartPre=+/sbin/ip link set can0 type can bitrate ${CAN_BITRATE}
+ExecStartPre=+/sbin/ip link set can0 up
+ExecCondition=/bin/sh -c "[ -n \"$SERIAL_PORTS$CAN_IFACES\" ]"
+ExecStart=/opt/webshark/bin/pktdump --spool /opt/webshark/spool --roll 8388608 --files 16 --serial ${SERIAL_PORTS} --can ${CAN_IFACES}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

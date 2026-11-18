@@ -35,8 +35,9 @@ const defaultBaud = 115200
 // serialPort 单串口配置: tty 为内核 tty 名(ttyUSB0, eBPF 事件按 tty->name 匹配,
 // 故剥掉 /dev/ 前缀); baud 只影响成帧的 3.5 字符静默时长, 不碰 termios.
 type serialPort struct {
-	tty  string
-	baud int
+	tty      string
+	baud     int
+	linkType capture.LinkType // 帧盖章链路类型(协议→USERn)
 }
 
 // parseSerial 解析 --serial 取值: 逗号分隔多口, 每口 `路径@波特率`(缺省 115200),
@@ -48,9 +49,18 @@ func parseSerial(s string) ([]serialPort, error) {
 		if seg == "" {
 			continue
 		}
-		p := serialPort{tty: seg, baud: defaultBaud}
+		p := serialPort{tty: seg, baud: defaultBaud, linkType: capture.LinkTypeUser0}
 		if i := strings.LastIndex(seg, "@"); i > 0 {
-			b, err := strconv.Atoi(seg[i+1:])
+			spec := seg[i+1:]
+			if j := strings.IndexByte(spec, ':'); j >= 0 {
+				lt := serialProtoMap[spec[j+1:]]
+				if lt == 0 {
+					return nil, fmt.Errorf("--serial 协议标签非法 %q (支持 modbus/ft12/645/698)", seg)
+				}
+				p.linkType = lt
+				spec = spec[:j]
+			}
+			b, err := strconv.Atoi(spec)
 			if err != nil {
 				return nil, fmt.Errorf("--serial 波特率非法 %q: %w", seg, err)
 			}
@@ -218,7 +228,7 @@ func run() int {
 			_ = w.Close()
 			return 1
 		}
-		srcs = append(srcs, serial.NewSerialSource([]string{p.tty}, p.baud, id, log))
+		srcs = append(srcs, serial.NewSerialSource([]string{p.tty}, p.baud, id, p.linkType, log))
 	}
 	for _, name := range ifaces {
 		id, err := w.AddInterface(capture.LinkTypeSocketCAN, name)
