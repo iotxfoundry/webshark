@@ -1,24 +1,16 @@
-# webshark：HTTP + WebSocket 服务（Wireshark 的 Web 前端）
-# 只听 loopback，公网入口交给反向代理（TLS + token，见 docs/deployment.md）。
-# 对外暴露时必须配 token：/etc/webshark/token 写一行 WEBSHARK_TOKEN=<随机串>；
-# EnvironmentFile 前导 - 表示文件可缺省（纯本机 loopback 使用可不配）。
 [Unit]
-Description=webshark - web frontend for Wireshark
-After=network.target sharkd.service dumpcap.service
+Description=webshark 报文分析服务
 Requires=sharkd.service
+After=sharkd.service
 
 [Service]
 User=webshark
-EnvironmentFile=-/etc/webshark/token
-ExecStart=/usr/local/bin/webshark -listen 127.0.0.1:8080 -sharkd /run/webshark/sharkd.sock -spool /var/lib/webshark
+Group=webshark
+Environment=HOME=/opt/webshark
+EnvironmentFile=-/opt/webshark/env
+ExecStart=/opt/webshark/bin/webshark -listen 0.0.0.0:8080 -sharkd /run/webshark/sharkd.sock -spool /opt/webshark/spool -ring 16
 Restart=always
-RestartSec=3
-
-NoNewPrivileges=yes
-ProtectSystem=strict
-ReadOnlyPaths=/var/lib/webshark
-ProtectHome=yes
-PrivateTmp=yes
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
