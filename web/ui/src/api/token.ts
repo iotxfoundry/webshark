@@ -3,12 +3,22 @@
 // 空 token = 服务端未配置鉴权(请求直通). 所有 fetch 带 Authorization: Bearer; WS 与下载直链带 ?token=.
 // 401 → clearToken(); standalone 由 App 切 token 录入页, embedded 通知宿主刷新令牌.
 // 令牌有效变化会递增版本号并通知订阅方(onTokenChange), 供连接层(WS)以新令牌重建.
+// embedded 另有启动门控: 宿主首个非空 set-token 未到前数据面(status 探活/建流)不启动,
+// 免挂载即 401 风暴(awaitingFirstToken).
 import { isEmbedded } from "../env";
 
 const TOKEN_KEY = "webshark-token";
 
 /** embedded 模式的内存令牌(不持久化) */
 let memToken = "";
+
+/** embedded: 宿主已注入首个非空令牌(置位后不回退——401 清除不重入门控, 恢复流程照旧) */
+let hostTokenSeen = false;
+
+/** embedded 宿主首令牌未到(数据面启动门控); standalone 恒 false(立即启动) */
+export function awaitingFirstToken(): boolean {
+  return isEmbedded() && !hostTokenSeen;
+}
 
 /** 令牌版本号: 每次有效变化 +1 */
 let version = 0;
@@ -44,6 +54,8 @@ export function setToken(token: string): void {
   const prev = getToken();
   if (isEmbedded()) {
     memToken = token;
+    // 非空 = 宿主真实注入(空串=清除, 继续等待); standalone 无门控不置位
+    if (token !== "") hostTokenSeen = true;
   } else {
     try {
       if (token === "") localStorage.removeItem(TOKEN_KEY);

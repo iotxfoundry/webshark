@@ -1,13 +1,14 @@
 // token.test.ts - embedded(内存态)与 standalone(localStorage)双轨 + onTokenChange 版本通知.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { getToken, setToken, clearToken, getTokenVersion, onTokenChange } from "./token";
-import { isEmbedded } from "../env";
 
+// hoisted 共享 mock 实例: vi.resetModules 后工厂重跑仍返回同一 fn(门控用例动态重导依赖它)
+const { isEmbeddedMock } = vi.hoisted(() => ({ isEmbeddedMock: vi.fn(() => false) }));
 vi.mock("../env", async (importOriginal) => {
   const orig = await importOriginal<typeof import("../env")>();
-  return { ...orig, isEmbedded: vi.fn(() => false) };
+  return { ...orig, isEmbedded: isEmbeddedMock };
 });
-const mockedIsEmbedded = vi.mocked(isEmbedded);
+const mockedIsEmbedded = vi.mocked(isEmbeddedMock);
 
 beforeEach(() => {
   localStorage.clear();
@@ -64,5 +65,23 @@ describe("onTokenChange 版本通知", () => {
     unsub();
     clearToken();
     expect(cb).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("awaitingFirstToken 数据面启动门控", () => {
+  it("embedded: 非空 set-token 前等待; 空串(清除)继续等待; 置位后不回退; standalone 恒 false", async () => {
+    // 门控状态是模块态且只置位一次: 取全新实例测完整生命周期(静态实例被上方用例共享)
+    vi.resetModules();
+    mockedIsEmbedded.mockReturnValue(true);
+    const fresh = await import("./token");
+    expect(fresh.awaitingFirstToken()).toBe(true);
+    fresh.setToken(""); // 宿主清除(空串): 继续等待
+    expect(fresh.awaitingFirstToken()).toBe(true);
+    fresh.setToken("host-tk");
+    expect(fresh.awaitingFirstToken()).toBe(false);
+    fresh.clearToken(); // 401 清除: 不重入门控(恢复流程照旧)
+    expect(fresh.awaitingFirstToken()).toBe(false);
+    mockedIsEmbedded.mockReturnValue(false);
+    expect(fresh.awaitingFirstToken()).toBe(false); // standalone 立即启动
   });
 });

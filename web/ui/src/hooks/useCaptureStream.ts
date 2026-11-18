@@ -15,7 +15,7 @@ import {
 import type { SharkdExpertResponse, SharkdFollowResult, SharkdFrameDetail } from "../api/sharkdTypes";
 import { openSharkdTransport, type SharkdConn } from "./sharkdTransport";
 import { createCaptureAggregator, type CaptureAggregator, type CaptureViewRow } from "./captureAggregator";
-import { getTokenVersion, onTokenChange } from "../api/token";
+import { getTokenVersion, onTokenChange, awaitingFirstToken } from "../api/token";
 import { errMsg } from "../api/client";
 
 export function useCaptureStream(initialFilter?: string) {
@@ -37,8 +37,11 @@ export function useCaptureStream(initialFilter?: string) {
   const [tokenVersion, setTokenVersion] = useState(getTokenVersion());
   useEffect(() => onTokenChange(() => setTokenVersion(getTokenVersion())), []);
 
-  // 传输生命周期: 挂载建连(同 handle), 卸载清理; 断线退避重连在 transport 内
+  // 传输生命周期: 挂载建连(同 handle), 卸载清理; 断线退避重连在 transport 内.
+  // embedded 门控: 宿主首令牌未到不建流(免挂载即无令牌 subscribe 401); 令牌到达即
+  // tokenVersion 变更唤醒本 effect 重跑, 无需定时器
   useEffect(() => {
+    if (awaitingFirstToken()) return;
     const close = openSharkdTransport({
       onReady: (send) => { sendRef.current = send; },
       onConn: (s) => {

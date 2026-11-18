@@ -65,7 +65,7 @@ make docker       # = make build + docker build -f build/Dockerfile
 
 ### iframe 嵌入（宿主注入令牌与主题）
 
-页面经 `window.self !== window.top` 自动识别嵌入形态并隐藏自身品牌；令牌与主题由宿主经 postMessage 注入，页面不提供切换入口，也不落盘：
+页面经 `window.self !== window.top` 自动识别嵌入形态并移除自身品牌（宿主系统头承载标题）；令牌与主题由宿主经 postMessage 注入，页面不提供切换入口，也不落盘；宿主首个非空 `set-token` 到达前数据面不启动（避免挂载即 401）。
 
 ```js
 const win = document.querySelector('iframe').contentWindow;

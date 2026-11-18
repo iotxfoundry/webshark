@@ -1,7 +1,7 @@
 // CapturePage.test.tsx - 抓包页集成(live 对接): subscribe 先行建流 + 零 JSON-RPC 轮询(WS 无
 // JSON-RPC; status 探活为独立 HTTP 轮询) / rows 推送渲染(No.=聚合序号) / 帧详情 HTTP 化(ref 复
 // 合键路由, 404 历史分片横幅) / 换帧详情常挂 / 自动跟随浮钮入口 / 暂停恢复抓包(_ctl 上行) / 断
-// 线重连(subscribe 再行)/ 导出 / 工具栏(品牌 standalone 显示|embedded 隐藏, 状态徽章来自
+// 线重连(subscribe 再行)/ 导出 / 工具栏(品牌 standalone 显示|embedded 不渲染, 状态徽章来自
 // status 探活, 主题/令牌图标钮).
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, screen } from "@testing-library/react";
@@ -158,11 +158,10 @@ describe("CapturePage", () => {
     expect(openToken).toHaveBeenCalledTimes(1);
   });
 
-  it("工具栏 embedded: 品牌隐藏(占位保留) + 主题/令牌钮隐藏 + status 失败 → sharkd 离线徽章", async () => {
+  it("工具栏 embedded: 品牌不渲染(无占位) + 主题/令牌钮隐藏 + status 失败 → sharkd 离线徽章", async () => {
     statusReply = { connected: false, files: [], reason: "sharkd 未就绪" };
     await mountOpen([], "a.pcapng", { embedded: true });
-    const brand = screen.getByText("Webshark");
-    expect(brand).not.toBeVisible(); // visibility 隐藏, 工具栏高度不跳
+    expect(screen.queryByText("Webshark")).not.toBeInTheDocument(); // 宿主系统头已示标题, 不留空位
     expect(screen.getByText("sharkd 离线")).toBeInTheDocument();
     expect(screen.getByText("0 分片")).toBeInTheDocument();
     expect(screen.getByText("已连接")).toBeInTheDocument(); // WS 流与 status 探活互相独立

@@ -9,7 +9,15 @@ import { ctlCaptureMsg, ctlFilterMsg } from "../api/captureStream";
 import { ApiError } from "../api/client";
 import { setToken } from "../api/token";
 import { MockWebSocket, installMockWebSocket } from "../test/mockWebSocket";
+import { isEmbedded } from "../env";
 import type { CaptureRowWire } from "./captureAggregator";
+
+// isEmbedded mock(env.ts 模块化 helper: 测试注入点; jsdom 中 self===top 恒 false = standalone)
+vi.mock("../env", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("../env")>();
+  return { ...orig, isEmbedded: vi.fn(() => false) };
+});
+const mockedIsEmbedded = vi.mocked(isEmbedded);
 
 /** subscribe fetch 调用清单(URL+body+headers), 供握手断言 */
 function subscribeCalls(): { url: string; body: Record<string, unknown>; auth?: string }[] {
@@ -87,6 +95,7 @@ describe("useCaptureStream", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     restoreWS();
+    mockedIsEmbedded.mockReturnValue(false);
     // act 包裹: 清理期 setToken 触发 hook 内 token 订阅 setState(RTL cleanup 在其后运行)
     act(() => { setToken(""); });
   });
@@ -421,5 +430,35 @@ describe("useCaptureStream", () => {
     expect(JSON.parse((init as RequestInit).body as string)).toEqual({ handle: lastHandleParam(), tap0: "expert" });
     await expect(ep).resolves.toMatchObject({ taps: [{ tap: "expert" }] });
     expect(ws.sent.filter((l) => l.includes('"method"'))).toEqual([]);
+  });
+
+  it("standalone 无门控: 挂载即建流(现状不变)", async () => {
+    mockedIsEmbedded.mockReturnValue(false);
+    await mount();
+    expect(subscribeCalls()).toHaveLength(1);
+  });
+
+  // embedded 门控置位一次不回退(token.ts 模块态): 本用例须置于其余用例之后, 后续用例皆为 standalone 不受影响
+  it("embedded 门控: 宿主首令牌未到不建流(零请求零 WS), 非空 set-token 到达即启动; 空串继续等待", async () => {
+    mockedIsEmbedded.mockReturnValue(true);
+    const h = renderHook(() => useCaptureStream());
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+    expect(subscribeCalls()).toHaveLength(0); // 无 subscribe
+    expect(MockWebSocket.instances).toHaveLength(0); // 无 WS
+    expect(h.result.current.conn).toBe("connecting");
+    act(() => { setToken(""); }); // 宿主清除(空串): 继续等待
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+    expect(subscribeCalls()).toHaveLength(0);
+    // 非空 set-token: 门控解除, 立即按新令牌建流
+    act(() => { setToken("tk-host"); });
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+    const subs = subscribeCalls();
+    expect(subs).toHaveLength(1);
+    expect(subs[0].auth).toBe("Bearer tk-host");
+    const ws = MockWebSocket.instances[0];
+    const u = new URL(ws.url);
+    expect(u.searchParams.get("token")).toBe("tk-host");
+    act(() => { ws.open(); });
+    expect(h.result.current.conn).toBe("open");
   });
 });

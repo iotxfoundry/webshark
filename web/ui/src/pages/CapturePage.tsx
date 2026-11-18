@@ -1,5 +1,6 @@
 // CapturePage.tsx - 抓包页(单条工具栏承载品牌/状态徽章/操作, 自撑满 100dvh):
-// 工具栏形态: standalone 显示品牌文字; iframe 嵌入(embedded)隐藏品牌, 其余一致.
+// 工具栏形态: standalone 显示品牌文字; iframe 嵌入(embedded)不渲染品牌(宿主系统头已示
+// 标题, 占位也无), 其余一致.
 // 数据面: 服务端后台追帧 → rows 微批推送(行含 ref 复合查询键) → 跨分片聚合器追加渲染(显示 No =
 // 聚合自增序号); rotated 信息性; reset 清空聚合器按服务端全量重推对齐; 断线重连(同 handle)按
 // 游标续推无重无漏.
@@ -235,14 +236,14 @@ export default function CapturePage({ embedded = false, onOpenToken }: { embedde
         </MessageBar>
       ))}
 
-      {/* 工具栏: [品牌(嵌入时隐藏)] 状态徽章(sharkd HTTP 探活 / WS 流 / 暂停) + 弹性空隙 +
+      {/* 工具栏: [品牌(嵌入时不渲染)] 状态徽章(sharkd HTTP 探活 / WS 流 / 暂停) + 弹性空隙 +
           操作(专家信息 / 暂停恢复 / 导出 / 主题 / 令牌). sharkd 探活(HTTP)与 WS 连接是两个
           不同状态, 均保留各出现一次. */}
       <div className={styles.toolbar}>
-        {/* 品牌: standalone 显示; embedded 用 visibility 隐藏(占位不跳高度) */}
-        <Text weight="semibold" size={500} style={{ visibility: embedded ? "hidden" : "visible" }}>
-          Webshark
-        </Text>
+        {/* 品牌: standalone 显示; embedded 从布局移除(宿主系统头已示页面标题) */}
+        {!embedded && (
+          <Text weight="semibold" size={500}>Webshark</Text>
+        )}
         <Badge appearance="tint" color={status?.connected ? "success" : "danger"}
           title={status?.connected ? "sharkd 已连接" : `sharkd 不可达${status?.reason ? `: ${status.reason}` : ""}`}>
           {status?.connected ? "sharkd 在线" : "sharkd 离线"}
