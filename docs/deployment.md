@@ -289,7 +289,7 @@ CGO_ENABLED=0 交叉编译的静态 ELF（`GOOS=linux GOARCH=arm64`）。
 ├── bin/{webshark,pktdump,compat-probe}   交叉编译产物
 ├── sharkd46/                             Lua 启用的 sharkd 4.6.9（PPA noble 构建）
 │   ├── sharkd  lib/  share/  init.lua    （Debian 官方构建禁用 sharkd 的 Lua 初始化，不可用）
-├── lua/webshark_serial.lua               USER0 逐帧嗅探分发器
+├── lua/webshark_serial.lua               USER0 逐帧嗅探分发器(固定位置, init.lua dofile 加载)
 ├── env                                   systemd EnvironmentFile（令牌/串口/CAN/FT1.2 协议）
 ├── setup-lua.sh                          ExecStartPre: Lua 入个人插件目录 + 注入 FT1.2 链回目标
 └── spool/                                分片环窗
@@ -377,20 +377,18 @@ RestartSec=2
 WantedBy=multi-user.target
 ```
 
-**`/opt/webshark/setup-lua.sh`**（sharkd.service ExecStartPre 调用）
+**`/opt/webshark/setup-lua.sh`**（sharkd.service ExecStartPre 调用；Lua 固定于
+`/opt/webshark/lua/` 不移动，sharkd 经数据目录 `init.lua` 的 dofile 加载）
 
 ```sh
 #!/bin/sh
-# sharkd profile 准备: Lua 分发器入个人插件目录(HOME=/opt/webshark), 注入 FT1.2 链回目标
+# FT1.2 链回内建 dissector 注入(SERIAL_FT12=101|103)
 set -e
-PLUGDIR="${HOME}/.local/lib/wireshark/plugins"
-mkdir -p "$PLUGDIR"
-cp /opt/webshark/lua/webshark_serial.lua "$PLUGDIR/"
 case "$SERIAL_FT12" in
   103) D=iec60870_5_103 ;;
   *)   D=iec60870_101 ;;
 esac
-sed -i "s/__FT12_DISSECTOR__/$D/" "$PLUGDIR/webshark_serial.lua"
+sed -i "s/__FT12_DISSECTOR__/$D/" /opt/webshark/lua/webshark_serial.lua
 ```
 
 **`/opt/webshark/env`**（EnvironmentFile；令牌部署时替换）
