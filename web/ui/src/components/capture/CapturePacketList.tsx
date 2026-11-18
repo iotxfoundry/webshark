@@ -8,7 +8,7 @@
 // 变化即 scrollToIndex 归底(恢复跟随立即回底/新批追加滚新末行; "auto" 的近底判定会让页头
 // 点恢复永不满足); 关闭时数据照常追加仅不滚动(Wireshark 同名语义).
 // jsdom(测试)回退普通滚动列表(isTestEnv, virtuoso 需真实视口测量, 同 CaptureTreeView).
-import { useCallback, useEffect, useRef, type Ref, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type Ref, type RefObject } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { Button, Tooltip, makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
 import { ArrowDown24Regular } from "@fluentui/react-icons";
@@ -37,9 +37,32 @@ const useStyles = makeStyles({
   cProto: { flexShrink: 0, width: "70px" },
   cLen: { flexShrink: 0, width: "56px", textAlign: "right" as const },
   cInfo: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const },
+  // 列宽拖拽把手: 贴列头右缘 4px 竖条(覆盖列边界便于命中), 键盘聚焦显示描边
+  colHandle: { position: "absolute", top: 0, bottom: 0, right: 0, width: "5px", marginRight: "-2px", padding: "0", border: "none", background: "none", cursor: "col-resize", touchAction: "none" as const, zIndex: 1, ":hover": { backgroundColor: tokens.colorBrandStroke1 }, ":focus-visible": { outlineWidth: "1px", outlineStyle: "solid", outlineColor: tokens.colorBrandStroke1 } },
 });
 
 export const CAPTURE_COLUMNS = ["No.", "时间", "源", "目的", "协议", "长度", "Info"] as const;
+
+/** 前 6 列默认宽度(px, 与 cNo/cTime/cAddr/cProto/cLen 类初值一致); Info 列恒 flex 吸收余宽 */
+const COL_DEFAULT_W = [52, 96, 140, 70, 56, 240];
+const COL_MIN_W = 36;
+const COL_MAX_W = 600;
+const COLW_KEY = "webshark.colwidth.v1";
+
+/** 读取持久化列宽(损坏/越界回退默认); jsdom 亦有 localStorage, 测试可注入 */
+function loadColWidths(): number[] {
+  try {
+    const raw = localStorage.getItem(COLW_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw) as unknown;
+      if (Array.isArray(arr) && arr.length === COL_DEFAULT_W.length &&
+          arr.every((w) => typeof w === "number" && w >= COL_MIN_W && w <= COL_MAX_W)) {
+        return arr;
+      }
+    }
+  } catch { /* 存储不可用(隐私模式等) */ }
+  return [...COL_DEFAULT_W];
+}
 
 /** 列头 className 选择: 按 CAPTURE_COLUMNS 下标绑定(改列名不再静默错列) */
 function headClass(i: number, styles: ReturnType<typeof useStyles>): string {
@@ -55,9 +78,11 @@ function headClass(i: number, styles: ReturnType<typeof useStyles>): string {
 }
 
 /** 包列表行组件(虚拟滚动 itemContent 亦用) */
-export function CapturePacketRow({ row, colCount, selected, onSelect, styles, monoS }: {
+export function CapturePacketRow({ row, colCount, colW, selected, onSelect, styles, monoS }: {
   row: CaptureViewRow;
   colCount: number;
+  /** 前 6 列宽度(px), 与表头同源保证对齐; Info 列恒 flex */
+  colW: number[];
   selected: boolean;
   onSelect: (r: CaptureViewRow) => void;
   styles: ReturnType<typeof useStyles>;
@@ -85,12 +110,12 @@ export function CapturePacketRow({ row, colCount, selected, onSelect, styles, mo
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onSelect(row); }}
       title={info}
     >
-      <span className={mergeClasses(styles.cNo, monoS.mono)}>{row.no}</span>
-      <span className={mergeClasses(styles.cTime, monoS.mono)}>{time}</span>
-      <span className={mergeClasses(styles.cAddr, monoS.mono)} title={src}>{src}</span>
-      <span className={mergeClasses(styles.cAddr, monoS.mono)} title={dst}>{dst}</span>
-      <span className={mergeClasses(styles.cProto, monoS.mono)}>{proto}</span>
-      <span className={mergeClasses(styles.cLen, monoS.mono)}>{len}</span>
+      <span className={mergeClasses(styles.cNo, monoS.mono)} style={{ width: colW[0] }}>{row.no}</span>
+      <span className={mergeClasses(styles.cTime, monoS.mono)} style={{ width: colW[1] }}>{time}</span>
+      <span className={mergeClasses(styles.cAddr, monoS.mono)} style={{ width: colW[2] }} title={src}>{src}</span>
+      <span className={mergeClasses(styles.cAddr, monoS.mono)} style={{ width: colW[3] }} title={dst}>{dst}</span>
+      <span className={mergeClasses(styles.cProto, monoS.mono)} style={{ width: colW[4] }}>{proto}</span>
+      <span className={mergeClasses(styles.cLen, monoS.mono)} style={{ width: colW[5] }}>{len}</span>
       <span className={mergeClasses(styles.cInfo, monoS.mono)}>{info}</span>
     </div>
   );
@@ -112,6 +137,45 @@ export function CapturePacketList({ rows, selectedNum, onSelect, following, onFo
 }) {
   const styles = useStyles();
   const monoS = useMonoStyles();
+  // 列宽状态(持久化 localStorage); 拖拽经 handle 的 pointer capture 驱动
+  const [colW, setColW] = useState<number[]>(loadColWidths);
+  // 持久化: colW 一变即写(拖拽/键盘/复位统一走此 effect, 处理器内不手动 setItem)
+  useEffect(() => {
+    try { localStorage.setItem(COLW_KEY, JSON.stringify(colW)); } catch { /* 存储不可用 */ }
+  }, [colW]);
+  // 拖拽起点快照(渲染提交后同步, 供 pointerdown 取 w0)
+  const colWRef = useRef(colW);
+  useEffect(() => { colWRef.current = colW; }, [colW]);
+  const resizeRef = useRef<{ i: number; x0: number; w0: number } | null>(null);
+  const onColResizeStart = useCallback((i: number) => (e: ReactPointerEvent<HTMLSpanElement>) => {
+    e.preventDefault();
+    e.stopPropagation(); // 不触发行的点选逻辑(表头非行, 防御)
+    resizeRef.current = { i, x0: e.clientX, w0: colWRef.current[i] };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  }, []);
+  const onColResizeMove = useCallback((e: ReactPointerEvent<HTMLSpanElement>) => {
+    const d = resizeRef.current;
+    if (!d) return;
+    const w = Math.max(COL_MIN_W, Math.min(COL_MAX_W, d.w0 + e.clientX - d.x0));
+    setColW((prev) => {
+      const next = [...prev];
+      next[d.i] = w;
+      return next;
+    });
+  }, []);
+  const onColResizeEnd = useCallback((e: ReactPointerEvent<HTMLSpanElement>) => {
+    if (!resizeRef.current) return;
+    resizeRef.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+  }, []);
+  const onColResizeReset = useCallback((i: number) => {
+    setColW((prev) => {
+      const next = [...prev];
+      next[i] = COL_DEFAULT_W[i];
+      return next;
+    });
+  }, []);
+
   const colCount = rows[0]?.c.length ?? 7;
   const virtual = !isTestEnv();
   const innerRef = useRef<VirtuosoHandle | null>(null);
@@ -153,6 +217,7 @@ export function CapturePacketList({ rows, selectedNum, onSelect, following, onFo
       key={rows[i].no}
       row={rows[i]}
       colCount={colCount}
+      colW={colW}
       selected={rows[i].no === selectedNum}
       onSelect={onSelect}
       styles={styles}
@@ -164,7 +229,26 @@ export function CapturePacketList({ rows, selectedNum, onSelect, following, onFo
     <div className={styles.root}>
       <div className={styles.head}>
         {CAPTURE_COLUMNS.map((h, i) => (
-          <span key={h} className={headClass(i, styles)}>{h}</span>
+          <span key={h} className={headClass(i, styles)} style={i < 6 ? { width: colW[i], position: "relative" } : undefined}>
+            {h}
+            {i < 6 && (
+              <button
+                type="button"
+                aria-label={`调整${h}列宽(拖拽, 方向键微调, 双击复位)`}
+                className={styles.colHandle}
+                onPointerDown={onColResizeStart(i)}
+                onPointerMove={onColResizeMove}
+                onPointerUp={onColResizeEnd}
+                onLostPointerCapture={onColResizeEnd}
+                onDoubleClick={() => onColResizeReset(i)}
+                onKeyDown={(e) => {
+                  const step = e.shiftKey ? 32 : 8;
+                  if (e.key === "ArrowLeft") { e.preventDefault(); setColW((prev) => { const n = [...prev]; n[i] = Math.max(COL_MIN_W, n[i] - step); return n; }); }
+                  if (e.key === "ArrowRight") { e.preventDefault(); setColW((prev) => { const n = [...prev]; n[i] = Math.min(COL_MAX_W, n[i] + step); return n; }); }
+                }}
+              />
+            )}
+          </span>
         ))}
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>

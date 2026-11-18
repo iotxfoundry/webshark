@@ -60,6 +60,28 @@ describe("CAPTURE_COLUMNS", () => {
 });
 
 describe("CapturePacketList", () => {
+  it("列宽拖拽: 把手方向键调整列宽并持久化 localStorage, 双击复位", () => {
+    localStorage.removeItem("webshark.colwidth.v1");
+    render(
+      <FluentProvider theme={webDarkTheme}>
+        <div style={{ height: 300 }}>
+          <CapturePacketList rows={rows} onSelect={() => undefined} />
+        </div>
+      </FluentProvider>,
+    );
+    expect(screen.getByText("No.").style.width).toBe("52px");
+    // 键盘调整时间列 +16px(jsdom 无 PointerEvent 实现, pointer 拖拽路径以真浏览器为准)
+    const handle = screen.getByRole("button", { name: "调整时间列宽(拖拽, 方向键微调, 双击复位)" });
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(screen.getByText("时间").style.width).toBe("104px");
+    // 双击复位(持久化时机)
+    fireEvent.doubleClick(handle);
+    expect(screen.getByText("时间").style.width).toBe("96px");
+    expect(JSON.parse(localStorage.getItem("webshark.colwidth.v1")!)[1]).toBe(96);
+    localStorage.removeItem("webshark.colwidth.v1");
+  });
+
+
   it("行渲染: 列数组按位置映射七列", () => {
     render(
       <FluentProvider theme={webDarkTheme}>
