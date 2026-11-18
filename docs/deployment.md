@@ -289,7 +289,9 @@ CGO_ENABLED=0 交叉编译的静态 ELF（`GOOS=linux GOARCH=arm64`）。
 ├── bin/{webshark,pktdump,compat-probe}   交叉编译产物
 ├── sharkd46/                             Lua 启用的 sharkd 4.6.9（PPA noble 构建）
 │   ├── sharkd  lib/  share/  init.lua    （Debian 官方构建禁用 sharkd 的 Lua 初始化，不可用）
-├── lua/webshark_serial.lua               USER0 逐帧嗅探分发器(固定位置, init.lua dofile 加载)
+├── lua/
+│   ├── init.lua                          Lua 主入口(系统 init.lua 仅一行 bootstrap 指向此文件)
+│   └── webshark_serial.lua               USER0 逐帧嗅探分发器
 ├── env                                   systemd EnvironmentFile（令牌/串口/CAN/FT1.2 协议）
 ├── setup-lua.sh                          ExecStartPre: Lua 入个人插件目录 + 注入 FT1.2 链回目标
 └── spool/                                分片环窗
@@ -299,8 +301,9 @@ CGO_ENABLED=0 交叉编译的静态 ELF（`GOOS=linux GOARCH=arm64`）。
 Lua 初始化（编译期含 Lua 但运行时不加载任何用户脚本，strace 实证零 .lua
 打开）——必须用 **PPA wireshark-dev/stable 的 noble arm64 构建**（Lua 启用，
 与 x86 宿主同源），或自编译。该构建的 sharkd 以**二进制所在目录**为数据/
-配置根：`lib/`（库树）、`share/`（数据）、`init.lua`（全局 Lua 入口）、
-`user_dlts`（USERn→内建 dissector 映射）均放此处。
+配置根：`lib/`（库树）、`share/`（数据）、`init.lua`（**一行 bootstrap**，
+`dofile("/opt/webshark/lua/init.lua")` 指向 /opt/webshark 下的 Lua 主入口——
+全部 Lua 配置由此收敛于 /opt/webshark/lua/，系统目录零配置）。
 
 systemd 单元与脚本（与设备 `/etc/systemd/system/`、`/opt/webshark/` 逐字一致）：
 
