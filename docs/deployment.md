@@ -108,6 +108,17 @@ WantedBy=multi-user.target
 
 `EnvironmentFile=-/etc/webshark/token` 的前导 `-` 表示文件可缺省（本机 loopback 使用可不配 token）。
 
+### 包列表颜色（colorfilters）
+
+包列表行色由 sharkd 色彩滤镜驱动（`frames` 响应逐行返回 `bg/fg`），规则缺失时列表无配色（默认前景色）。部署包内置 Wireshark 标准 22 条规则（[deploy/systemd/colorfilters](../deploy/systemd/colorfilters)），安装到 sharkd 个人配置目录后重启 sharkd 生效：
+
+```sh
+sudo HOME=/opt/webshark bash deploy/systemd/setup-colorfilters.sh   # 幂等；自定义 HOME 者覆盖之
+sudo systemctl restart sharkd
+```
+
+自定义颜色：编辑目标 `colorfilters` 后重启 sharkd（Wireshark 桌面版「视图 → 着色规则」导出的文件通用，`@名称@过滤表达式@[bg][fg]` 行式格式）。
+
 ## 反向代理
 
 webshark 含 WebSocket（`/api/ws`）与流式下载（`/api/download` 为 chunked），代理必须透传 upgrade 与禁缓冲。
