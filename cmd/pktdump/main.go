@@ -34,6 +34,16 @@ const defaultBaud = 115200
 
 // serialPort 单串口配置: tty 为内核 tty 名(ttyUSB0, eBPF 事件按 tty->name 匹配,
 // 故剥掉 /dev/ 前缀); baud 只影响成帧的 3.5 字符静默时长, 不碰 termios.
+// serialProtoMap 串口协议标签 → 落盘链路类型:
+// modbus→USER0(user_dlts 映射 mbrtu 深解), ft12→USER1(→iec60870_101/103),
+// 645/698→USER2/3(上游无内建 dissector, 通用帧 hex)。
+var serialProtoMap = map[string]capture.LinkType{
+	"modbus": capture.LinkTypeUser0,
+	"ft12":   capture.LinkTypeUser1,
+	"645":    capture.LinkTypeUser2,
+	"698":    capture.LinkTypeUser3,
+}
+
 type serialPort struct {
 	tty      string
 	baud     int

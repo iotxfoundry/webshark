@@ -15,7 +15,7 @@ func TestSerialStartUnavailableWithoutPrivilege(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root 环境可真加载，本用例只验非特权降级路径")
 	}
-	s := NewSerialSource([]string{"ttyUSB0"}, 9600, 0, nil)
+	s := NewSerialSource([]string{"ttyUSB0"}, 9600, 0, capture.LinkTypeUser0, nil)
 	err := s.Start(t.Context(), func(capture.Frame) {})
 	if err == nil {
 		s.Stop()
@@ -66,7 +66,7 @@ func TestFramerFieldsMapping(t *testing.T) {
 // TestSerialSourceFrameIfaceID 串口源帧携带分配的采集接口号（feed→Framer OnFrame 构造点，
 // 直调 feed 不走真 eBPF；feed 内部自持锁，测试侧不得外包 s.mu）。
 func TestSerialSourceFrameIfaceID(t *testing.T) {
-	s := NewSerialSource(nil, 9600, 7, nil)
+	s := NewSerialSource(nil, 9600, 7, capture.LinkTypeUser0, nil)
 	s.mu.Lock()
 	s.fr = map[string]*framerPair{}
 	s.mu.Unlock()

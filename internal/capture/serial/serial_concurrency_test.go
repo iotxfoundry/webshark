@@ -12,7 +12,7 @@ import (
 // 并发跑同一 Framer（-race 压 1 秒）：两处全程持 s.mu，无 data race 且切帧回调
 // 不重入（缓冲状态一致性）。不走真 eBPF，直测源内共享 Framer 的两条路径。
 func TestSerialSourceFeedFlushIdleRace(t *testing.T) {
-	s := NewSerialSource(nil, 115200, 0, nil)
+	s := NewSerialSource(nil, 115200, 0, capture.LinkTypeUser0, nil)
 	var mu sync.Mutex
 	pushed := 0
 	push := func(capture.Frame) {

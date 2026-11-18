@@ -50,12 +50,12 @@ func (s *stubSource) Stop() error {
 func TestParseSerial(t *testing.T) {
 	ports, err := parseSerial("/dev/ttyUSB0@115200,/dev/ttyUSB1@9600")
 	require.NoError(t, err)
-	assert.Equal(t, []serialPort{{tty: "ttyUSB0", baud: 115200}, {tty: "ttyUSB1", baud: 9600}}, ports)
+	assert.Equal(t, []serialPort{{tty: "ttyUSB0", baud: 115200, linkType: capture.LinkTypeUser0}, {tty: "ttyUSB1", baud: 9600, linkType: capture.LinkTypeUser0}}, ports)
 
 	// 无 @波特率 → 缺省 115200; 空段忽略; 无 /dev/ 前缀原样作 tty 名.
 	ports, err = parseSerial(" ,/dev/ttyS1@9600,ttyS2,")
 	require.NoError(t, err)
-	assert.Equal(t, []serialPort{{tty: "ttyS1", baud: 9600}, {tty: "ttyS2", baud: defaultBaud}}, ports)
+	assert.Equal(t, []serialPort{{tty: "ttyS1", baud: 9600, linkType: capture.LinkTypeUser0}, {tty: "ttyS2", baud: defaultBaud, linkType: capture.LinkTypeUser0}}, ports)
 
 	_, err = parseSerial("/dev/ttyS0@abc")
 	assert.Error(t, err)
