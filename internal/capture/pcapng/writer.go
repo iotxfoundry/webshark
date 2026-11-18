@@ -107,6 +107,7 @@ type ifaceRec struct {
 // Writer 单文件 pcapng 写入器: AddInterface 必须在首包前全部完成, 首包即封板
 // (sealed), 之后不能再增接口. 每块整体单次 Write 落盘, 不缓冲.
 type Writer struct {
+	// dir spool 目录.
 	dir    string
 	path   string // 指定分片文件名时用(RollingWriter); 空则 CreateTemp 随机名
 	file   *os.File
@@ -116,9 +117,9 @@ type Writer struct {
 	closed bool
 }
 
-// NewWriter 创建写入器, spool 目录由调用方给定; 目录在首个 AddInterface 时
-// 创建(含父目录). 文件名自动生成(cap-<随机>.pcapng).
+// NewWriter 创建写入器, spool 目录由调用方给定; 目录在首个 AddInterface 时创建(含父目录). 文件名自动生成(cap-<随机>.pcapng).
 func NewWriter(dir string) *Writer {
+	// 仅记配置, 目录与文件延迟到首个 AddInterface 时创建.
 	return &Writer{dir: dir}
 }
 
@@ -217,10 +218,9 @@ func (w *Writer) Close() error {
 	return nil
 }
 
-// CanFrameBE SocketCAN 载荷字节序换转: 内核 can_frame/canfd_frame 的 can_id/flags 字段
-// 为主机序(LE), Wireshark 对 LINKTYPE_CAN_SOCKETCAN 默认按大端读 —— 前 4B 换大端,
-// 其余(len/flags/data)原样. 采集源推帧为内核字节序, 落盘前换转.
+// CanFrameBE SocketCAN 载荷字节序换转: 内核 can_frame/canfd_frame 的 can_id/flags 字段为主机序(LE), Wireshark 对 LINKTYPE_CAN_SOCKETCAN 默认按大端读 —— 前 4B 换大端, 其余(len/flags/data)原样. 采集源推帧为内核字节序, 落盘前换转.
 func CanFrameBE(kernel []byte) []byte {
+	// 不足 4B 无 can_id 可换转, 原样返回.
 	if len(kernel) < 4 {
 		return kernel
 	}

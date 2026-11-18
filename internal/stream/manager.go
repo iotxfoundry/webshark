@@ -33,7 +33,8 @@ var ErrClosed = errors.New("服务已关闭")
 
 // Config 管理器配置。
 type Config struct {
-	Sock     string       // sharkd UDS
+	// Sock sharkd UDS。
+	Sock     string
 	SpoolDir string       // pcapng 分片目录
 	RingSize int          // 环窗分片数, 0 → spool.DefaultRingSize
 	Log      *slog.Logger // nil → slog.Default()
@@ -41,6 +42,7 @@ type Config struct {
 
 // Manager 会话表 + 分片检测单例订阅分发 + 断线宽限回收 + 进程级轻查询实例。
 type Manager struct {
+	// cfg 管理器配置。
 	cfg      Config
 	ringSize int
 	log      *slog.Logger
@@ -60,6 +62,7 @@ type Manager struct {
 
 // NewManager 创建管理器并启动分片检测与 janitor。
 func NewManager(cfg Config) *Manager {
+	// log 为 nil 时回落默认 logger。
 	if cfg.Log == nil {
 		cfg.Log = slog.Default()
 	}

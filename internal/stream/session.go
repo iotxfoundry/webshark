@@ -27,6 +27,7 @@ var errSessionClosed = errors.New("实时流已关闭")
 
 // Session 一条实时流（单生产者 worker + 单消费者 WS writer）。
 type Session struct {
+	// handle 流句柄。
 	handle string
 	m      *Manager
 	ctx    context.Context

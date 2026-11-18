@@ -12,8 +12,7 @@ package capture
 
 import "time"
 
-// LinkType 链路层类型(libpcap LINKTYPE 值域): 帧携带该类型, 落盘侧据此
-// 声明 pcapng 接口块, Wireshark 按 DLT 选 dissector.
+// LinkType 链路层类型(libpcap LINKTYPE 值域): 帧携带该类型, 落盘侧据此声明 pcapng 接口块, Wireshark 按 DLT 选 dissector.
 type LinkType uint16
 
 // 落盘链路类型常量(libpcap LINKTYPE 值域): 接口由 daemon 按帧携带的链路类型
@@ -33,7 +32,8 @@ const (
 
 // Frame 单个采集到的原始帧: 含链路层头的字节 + 采集源产出的字段表.
 type Frame struct {
-	IfaceID   uint16            // 采集接口 id(引擎内分配, 0 保留给未知接口)
+	// IfaceID 采集接口 id(引擎内分配, 0 保留给未知接口).
+	IfaceID   uint16
 	LinkType  LinkType          // 该帧所在链路的链路层类型
 	Direction Direction         // 收/发方向
 	TS        time.Time         // 抓包时刻
@@ -44,6 +44,7 @@ type Frame struct {
 // Direction 帧方向: 采集口观测到的收/发.
 type Direction uint8
 
+// 方向常量.
 const (
 	// Unknown 方向未知(源未标注).
 	Unknown Direction = iota
@@ -53,10 +54,11 @@ const (
 	RX
 )
 
-// ErrSourceUnavailable 采集源能力探测失败(接口不存在/内核缺配置/权限不足等),
-// 调用方应降级跳过该源而非中断整体采集. Kind 存源显示名("CAN"/"串口").
+// ErrSourceUnavailable 采集源能力探测失败(接口不存在/内核缺配置/权限不足等), 调用方应降级跳过该源而非中断整体采集.
 type ErrSourceUnavailable struct {
-	Kind   string
+	// Kind 源显示名("CAN"/"串口").
+	Kind string
+	// Reason 不可用原因.
 	Reason string
 }
 

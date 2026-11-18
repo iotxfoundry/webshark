@@ -20,9 +20,9 @@ func shardName(t time.Time, seq uint32) string {
 	return fmt.Sprintf("cap-%s-%06d.pcapng", t.UTC().Format("20060102-150405"), seq)
 }
 
-// RollingWriter 滚动写入器: 接口元数据记在内存, 每滚动新分片时重放,
-// 保证分片自含元数据. 非并发安全.
+// RollingWriter 滚动写入器: 接口元数据记在内存, 每滚动新分片时重放, 保证分片自含元数据. 非并发安全.
 type RollingWriter struct {
+	// dir 分片输出目录.
 	dir      string
 	maxSize  int64
 	maxFiles int
@@ -33,6 +33,7 @@ type RollingWriter struct {
 
 // NewRolling 创建滚动写入器; spool 目录不存在时立即创建(含父目录).
 func NewRolling(dir string, maxFileSize int64, maxFiles int) (*RollingWriter, error) {
+	// 参数校验先行: 非法配置直接报错, 不落半成品目录.
 	if maxFileSize <= 0 {
 		return nil, fmt.Errorf("pcapng: maxFileSize 必须为正, 得到 %d", maxFileSize)
 	}

@@ -30,6 +30,7 @@ import (
 // filter 透传断言）、failLoads 注入 load 失败（退避验证）、SlowFrames 延迟
 // （轻查询并行不互扰验证）、TapDetails 生成专家明细条数。
 type Sharkd struct {
+	// ln UDS 监听句柄。
 	ln net.Listener
 	mu sync.Mutex
 
@@ -55,6 +56,7 @@ type Sharkd struct {
 
 // StartSharkd 起 UDS 假 sharkd（测试收尾自动关听）。
 func StartSharkd(t *testing.T) *Sharkd {
+	// UDS 落在 t.TempDir()，测试收尾随目录一并清理。
 	t.Helper()
 	ln, err := net.Listen("unix", filepath.Join(t.TempDir(), "sharkd.sock"))
 	require.NoError(t, err)
@@ -252,6 +254,7 @@ func sizeOf(path string) int64 {
 
 // WriteShard 在 dir 写分片并以 os.Chtimes 指定 mtime（规避文件系统时间戳精度）。
 func WriteShard(t *testing.T, dir, name string, mtime time.Time, content []byte) {
+	// 写完即 Chtimes，保证 mtime 断言不受落盘时刻影响。
 	t.Helper()
 	p := filepath.Join(dir, name)
 	require.NoError(t, os.WriteFile(p, content, 0o644))
@@ -260,6 +263,7 @@ func WriteShard(t *testing.T, dir, name string, mtime time.Time, content []byte)
 
 // ReadFrame 带超时读一条 WS text 帧原文。
 func ReadFrame(t *testing.T, ws *websocket.Conn) string {
+	// 5s 读超时，防对端不回帧时测试挂死。
 	t.Helper()
 	require.NoError(t, ws.SetReadDeadline(time.Now().Add(5*time.Second)))
 	_, data, err := ws.ReadMessage()

@@ -69,9 +69,9 @@ const (
 	dirRX = 1 // n_tty_receive_buf_common：主机收
 )
 
-// SerialSource 串口 eBPF 采集源：一实例服务一组 tty 名（tty->name，如 ttyUSB0），
-// 每口 TX/RX 各一个 Framer 静默成帧，切出的字节帧转 capture.Frame 推给调用方。
+// SerialSource 串口 eBPF 采集源：一实例服务一组 tty 名（tty->name，如 ttyUSB0），每口 TX/RX 各一个 Framer 静默成帧，切出的字节帧转 capture.Frame 推给调用方。
 type SerialSource struct {
+	// names 订阅的 tty 名清单（空=全收）。
 	names    []string
 	baud     int
 	ifaceID  uint16           // 帧携带的采集接口号（调用方分配，0 保留未知）
@@ -93,10 +93,9 @@ type framerPair struct {
 	rx *Framer
 }
 
-// NewSerialSource 新建串口源。构造只记配置，能力探测在 Start 做（失败返回
-// *capture.ErrSourceUnavailable 并记一条 WARN）。ifaceID 为帧携带的采集接口号
-// （调用方分配，0 保留未知）；log 为 nil 时用 slog.Default()。
+// NewSerialSource 新建串口源。构造只记配置，能力探测在 Start 做（失败返回 *capture.ErrSourceUnavailable 并记一条 WARN）。ifaceID 为帧携带的采集接口号（调用方分配，0 保留未知）；log 为 nil 时用 slog.Default()。
 func NewSerialSource(names []string, baud int, ifaceID uint16, linkType capture.LinkType, log *slog.Logger) *SerialSource {
+	// log 为 nil 时回落默认 logger。
 	if log == nil {
 		log = slog.Default()
 	}

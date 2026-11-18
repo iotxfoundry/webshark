@@ -8,9 +8,9 @@ import (
 	"fmt"
 )
 
-// HelloFrame 序列化握手确认帧 {"type":"hello","mode":"live"}（hello 帧仅
-// live 模式使用，mode 恒为 "live"）。
+// HelloFrame 序列化握手确认帧 {"type":"hello","mode":"live"}（hello 帧仅 live 模式使用，mode 恒为 "live"）。
 func HelloFrame() []byte {
+	// 帧体恒定，序列化必成功。
 	return mustJSON(struct {
 		Type string `json:"type"`
 		Mode string `json:"mode"`
@@ -19,6 +19,7 @@ func HelloFrame() []byte {
 
 // RowsFrame 序列化微批行帧：rows 为 sharkd frames 行原样 JSON（已含 ref 复合键）。
 func RowsFrame(mode, shard string, rows []json.RawMessage) []byte {
+	// rows 原样透传，不重编码。
 	return mustJSON(struct {
 		Type  string            `json:"type"`
 		Mode  string            `json:"mode"`
@@ -29,6 +30,7 @@ func RowsFrame(mode, shard string, rows []json.RawMessage) []byte {
 
 // RotatedFrame 序列化轮换通知帧 {"type":"rotated","shard":shard}。
 func RotatedFrame(shard string) []byte {
+	// 帧体恒定，序列化必成功。
 	return mustJSON(struct {
 		Type  string `json:"type"`
 		Shard string `json:"shard"`
@@ -37,6 +39,7 @@ func RotatedFrame(shard string) []byte {
 
 // ResetFrame 序列化对齐重推帧 {"type":"reset","reason":reason}。
 func ResetFrame(reason string) []byte {
+	// 帧体恒定，序列化必成功。
 	return mustJSON(struct {
 		Type   string `json:"type"`
 		Reason string `json:"reason"`
@@ -45,6 +48,7 @@ func ResetFrame(reason string) []byte {
 
 // ErrorFrame 序列化错误提示帧（筛选校验失败等 UI 提示场景）。
 func ErrorFrame(reason string) []byte {
+	// 帧体恒定，序列化必成功。
 	return mustJSON(struct {
 		Type   string `json:"type"`
 		Reason string `json:"reason"`
@@ -57,11 +61,13 @@ func mustJSON(v any) []byte {
 	return b
 }
 
-// HandleCtl 解析一条 WS 上行 _ctl 文本（其他形态静默忽略）：
-// _ctl{op:"capture",state:"pause"|"resume"} 追帧暂停/恢复；
-// _ctl{op:"filter",filter} 筛选模式进/出/切换（空串=退出）。提交仅入待生效
-// 队列，worker tick 取走执行（走查等重活不占 WS 读循环）。
+// HandleCtl 解析一条 WS 上行 _ctl 文本（其他形态静默忽略）。提交仅入待生效队列，
+// worker tick 取走执行（走查等重活不占 WS 读循环）。受控形态：
+//
+//	_ctl{op:"capture",state:"pause"|"resume"} —— 追帧暂停/恢复；
+//	_ctl{op:"filter",filter} —— 筛选模式进/出/切换（空串=退出）。
 func HandleCtl(s *Session, msg []byte) {
+	// 坏 JSON 或非 _ctl 形态：静默忽略，连接不断。
 	var m struct {
 		Type   string  `json:"type"`
 		Op     string  `json:"op"`

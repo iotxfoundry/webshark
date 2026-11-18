@@ -41,8 +41,10 @@ const (
 
 // ParseCanFrame 解析 SocketCAN 原始帧(用户态纯函数): 经典 16B 与 FD 72B 两种布局,
 // 按输入长度区分(采集侧单帧 read 的返回长度即帧型). 字段表:
-// can.id(hex)/can.ext/can.rtr/can.fd/can.dlc(线上 DLC 码)/can.len(实际数据字节数).
+//
+//	can.id(hex)/can.ext/can.rtr/can.fd/can.dlc(线上 DLC 码)/can.len(实际数据字节数).
 func ParseCanFrame(b []byte) (map[string]string, error) {
+	// 帧长即帧型判据, 两种布局外皆非法.
 	switch len(b) {
 	case classicFrameLen:
 		return parseClassic(b)
@@ -117,6 +119,7 @@ func fdDlc(n int) int {
 
 // CANSource 单 CAN 接口采集源: 一个 AF_CAN RAW socket, 读循环单协程.
 type CANSource struct {
+	// iface 采集接口名(如 "can0").
 	iface   string
 	ifaceID uint16 // 帧携带的采集接口号(引擎分配, 0 保留未知)
 	mu      sync.Mutex
@@ -126,9 +129,9 @@ type CANSource struct {
 	wg      sync.WaitGroup // 读循环
 }
 
-// NewCANSource 新建 CAN 源. 构造只记配置, 探测在 Start 做(失败返回 *capture.ErrSourceUnavailable).
-// ifaceID 为帧携带的采集接口号(引擎分配, 0 保留未知).
+// NewCANSource 新建 CAN 源. 构造只记配置, 探测在 Start 做(失败返回 *capture.ErrSourceUnavailable). ifaceID 为帧携带的采集接口号(引擎分配, 0 保留未知).
 func NewCANSource(iface string, ifaceID uint16) *CANSource {
+	// fd 预置 -1 表示未启动, Stop 幂等判据.
 	return &CANSource{iface: iface, ifaceID: ifaceID, fd: -1}
 }
 

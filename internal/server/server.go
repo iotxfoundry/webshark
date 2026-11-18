@@ -34,7 +34,8 @@ func init() {
 
 // Config 服务配置（零值可用：Web 回落内嵌站点，Log 回落默认 logger）。
 type Config struct {
-	SpoolDir   string       // pcapng 分片目录
+	// SpoolDir pcapng 分片目录。
+	SpoolDir   string
 	SharkdSock string       // sharkd UDS
 	RingSize   int          // 0 → spool.DefaultRingSize
 	Token      string       // 空 = 不鉴权
@@ -44,6 +45,7 @@ type Config struct {
 
 // Server HTTP 服务：流管理器 + 分片缓存实例 + 静态站点。
 type Server struct {
+	// cfg 服务配置。
 	cfg        Config
 	log        *slog.Logger
 	mgr        *stream.Manager
@@ -60,6 +62,7 @@ type Server struct {
 
 // New 装配服务（不做 IO：spool 目录与 sharkd 可达性由 handler 运行期报告）。
 func New(cfg Config) *Server {
+	// 零值回落：Web 内嵌站点、Log 默认 logger。
 	if cfg.Web == nil {
 		cfg.Web = web.FS()
 	}
