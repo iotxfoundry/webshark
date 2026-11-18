@@ -292,8 +292,7 @@ CGO_ENABLED=0 交叉编译的静态 ELF（`GOOS=linux GOARCH=arm64`）。
 ├── lua/
 │   ├── init.lua                          Lua 主入口(系统 init.lua 仅一行 bootstrap 指向此文件)
 │   └── webshark_serial.lua               USER0 逐帧嗅探分发器
-├── env                                   systemd EnvironmentFile（令牌/串口/CAN/FT1.2 协议）
-├── setup-lua.sh                          ExecStartPre: Lua 入个人插件目录 + 注入 FT1.2 链回目标
+├── env                                   systemd EnvironmentFile（令牌/串口/CAN）
 └── spool/                                分片环窗
 ```
 
