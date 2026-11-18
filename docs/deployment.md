@@ -275,3 +275,141 @@ DL/T 645 数据标识映射取常用子集，移植自社区开源解析表：[l
 | 界面空白/提示未构建 | 二进制里内嵌的是旧/空 `web/dist.zip`。`make web && make build` 重新打包，或开发态用 `-web-dir web/dist` 指向刚构建的目录 |
 | 有分片但看不到新行 | dumpcap 与 `-ring` 不匹配导致旧片不轮换；或 sharkd 版本过老。确认 `-b files:16` 与 `-ring 16` 对齐 |
 | 有分片但界面空白（`/api/download` 导出 503「分片均不可读」） | 分片文件属主与 sharkd 运行用户不一致（如旧部署 `User=dumpcap` 写出 0600 属主 dumpcap 的文件）。`ls -l /var/lib/webshark` 确认属主是 `webshark`；旧文件 `chown webshark:webshark` 即可 |
+
+## arm64 板载部署（/opt/webshark，二进制部署，无 docker）
+
+实测环境：LPB3588（RK3588）aarch64 / Ubuntu 24.04 / 内核带 BTF；二进制为
+CGO_ENABLED=0 交叉编译的静态 ELF（`GOOS=linux GOARCH=arm64`）。
+专用系统用户 `webshark`（家目录=/opt/webshark，加入 dialout 组）。
+
+目录布局：
+
+```
+/opt/webshark/
+├── bin/{webshark,pktdump,compat-probe}   交叉编译产物
+├── sharkd46/                             Lua 启用的 sharkd 4.6.9（PPA noble 构建）
+│   ├── sharkd  lib/  share/  init.lua    （Debian 官方构建禁用 sharkd 的 Lua 初始化，不可用）
+├── lua/webshark_serial.lua               USER0 逐帧嗅探分发器
+├── env                                   systemd EnvironmentFile（令牌/串口/CAN/FT1.2 协议）
+├── setup-lua.sh                          ExecStartPre: Lua 入个人插件目录 + 注入 FT1.2 链回目标
+└── spool/                                分片环窗
+```
+
+**sharkd 4.6.9 套件来源（关键）**：Debian 官方 wireshark 包的 sharkd 禁用了
+Lua 初始化（编译期含 Lua 但运行时不加载任何用户脚本，strace 实证零 .lua
+打开）——必须用 **PPA wireshark-dev/stable 的 noble arm64 构建**（Lua 启用，
+与 x86 宿主同源），或自编译。该构建的 sharkd 以**二进制所在目录**为数据/
+配置根：`lib/`（库树）、`share/`（数据）、`init.lua`（全局 Lua 入口）、
+`user_dlts`（USERn→内建 dissector 映射）均放此处。
+
+systemd 单元与脚本（与设备 `/etc/systemd/system/`、`/opt/webshark/` 逐字一致）：
+
+**`/etc/systemd/system/sharkd.service`**
+
+```ini
+[Unit]
+Description=sharkd (Wireshark 4.6.9 PPA, Lua 启用) for webshark
+After=network.target
+
+[Service]
+User=webshark
+Group=webshark
+Environment=HOME=/opt/webshark
+EnvironmentFile=-/opt/webshark/env
+ExecStartPre=/opt/webshark/setup-lua.sh
+ExecStart=/opt/webshark/sharkd46/sharkd46.sh /run/webshark/sharkd.sock
+RuntimeDirectory=webshark
+RuntimeDirectoryMode=0755
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**`/etc/systemd/system/pktdump.service`**
+
+```ini
+[Unit]
+Description=webshark 串口/CAN 采集器 (pktdump)
+After=network.target
+
+[Service]
+User=webshark
+Group=webshark
+SupplementaryGroups=dialout
+Environment=HOME=/opt/webshark
+EnvironmentFile=-/opt/webshark/env
+# CAN RAW 需 NET_RAW; 串口 eBPF 旁听需 BPF+PERFMON(内核>=5.8; 更老内核改 CAP_SYS_ADMIN)
+AmbientCapabilities=CAP_NET_RAW CAP_BPF CAP_PERFMON
+CapabilityBoundingSet=CAP_NET_RAW CAP_BPF CAP_PERFMON
+# CAN 比特率按实际总线调整; 两源都留空则本服务空转不启动
+ExecStartPre=+/sbin/ip link set can0 down
+ExecStartPre=+/sbin/ip link set can0 type can bitrate ${CAN_BITRATE}
+ExecStartPre=+/sbin/ip link set can0 up
+ExecCondition=/bin/sh -c "[ -n \"$SERIAL_PORTS$CAN_IFACES\" ]"
+ExecStart=/opt/webshark/bin/pktdump --spool /opt/webshark/spool --roll 8388608 --files 16 --serial ${SERIAL_PORTS} --can ${CAN_IFACES}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**`/etc/systemd/system/webshark.service`**
+
+```ini
+[Unit]
+Description=webshark 报文分析服务
+Requires=sharkd.service
+After=sharkd.service
+
+[Service]
+User=webshark
+Group=webshark
+Environment=HOME=/opt/webshark
+EnvironmentFile=-/opt/webshark/env
+ExecStart=/opt/webshark/bin/webshark -listen 0.0.0.0:8080 -sharkd /run/webshark/sharkd.sock -spool /opt/webshark/spool -ring 16
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**`/opt/webshark/setup-lua.sh`**（sharkd.service ExecStartPre 调用）
+
+```sh
+#!/bin/sh
+# sharkd profile 准备: Lua 分发器入个人插件目录(HOME=/opt/webshark), 注入 FT1.2 链回目标
+set -e
+PLUGDIR="${HOME}/.local/lib/wireshark/plugins"
+mkdir -p "$PLUGDIR"
+cp /opt/webshark/lua/webshark_serial.lua "$PLUGDIR/"
+case "$SERIAL_FT12" in
+  103) D=iec60870_5_103 ;;
+  *)   D=iec60870_101 ;;
+esac
+sed -i "s/__FT12_DISSECTOR__/$D/" "$PLUGDIR/webshark_serial.lua"
+```
+
+**`/opt/webshark/env`**（EnvironmentFile；令牌部署时替换）
+
+```sh
+# webshark 板载部署配置(systemd EnvironmentFile)
+# 令牌: 非 loopback 监听必须设置
+WEBSHARK_TOKEN=<令牌>
+# 串口监听口: 逗号分隔, 路径@波特率:协议; 协议可选 modbus/ft12/645/698(缺省 modbus)
+SERIAL_PORTS=/dev/ttyUSB0@9600:modbus
+# CAN 口: 逗号分隔; 留空=不采集 CAN
+CAN_IFACES=can0
+# CAN 总线比特率(需与总线上其它节点一致)
+CAN_BITRATE=500000
+# FT1.2 深度解析协议: 101(默认) 或 103
+SERIAL_FT12=101
+```
+
+**真机验收 checklist**：真实 RS-485 从站发帧验证 645/FT1.2 定界时序；CAN
+需总线上至少另一节点 ACK（单板自测用 `ip link set canX type can loopback on`）；
+arm64/armhf 的内核需 ≥5.8 + CONFIG_DEBUG_INFO_BTF（串口 eBPF 旁听前提）；
+pktdump 需 NET_RAW（CAN RAW）与 BPF/PERFMON 能力。
