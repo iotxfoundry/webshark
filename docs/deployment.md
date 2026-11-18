@@ -318,8 +318,7 @@ After=network.target
 User=webshark
 Group=webshark
 Environment=HOME=/opt/webshark
-EnvironmentFile=-/opt/webshark/env
-ExecStartPre=/opt/webshark/setup-lua.sh
+EnvironmentFile=-/opt/webshark/webshark.env
 ExecStart=/opt/webshark/sharkd46/sharkd46.sh /run/webshark/sharkd.sock
 RuntimeDirectory=webshark
 RuntimeDirectoryMode=0755
@@ -342,7 +341,7 @@ User=webshark
 Group=webshark
 SupplementaryGroups=dialout
 Environment=HOME=/opt/webshark
-EnvironmentFile=-/opt/webshark/env
+EnvironmentFile=-/opt/webshark/webshark.env
 # CAN RAW 需 NET_RAW; 串口 eBPF 旁听需 BPF+PERFMON(内核>=5.8; 更老内核改 CAP_SYS_ADMIN)
 AmbientCapabilities=CAP_NET_RAW CAP_BPF CAP_PERFMON
 CapabilityBoundingSet=CAP_NET_RAW CAP_BPF CAP_PERFMON
@@ -371,27 +370,13 @@ After=sharkd.service
 User=webshark
 Group=webshark
 Environment=HOME=/opt/webshark
-EnvironmentFile=-/opt/webshark/env
+EnvironmentFile=-/opt/webshark/webshark.env
 ExecStart=/opt/webshark/bin/webshark -listen 0.0.0.0:8080 -sharkd /run/webshark/sharkd.sock -spool /opt/webshark/spool -ring 16
 Restart=always
 RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
-```
-
-**`/opt/webshark/setup-lua.sh`**（sharkd.service ExecStartPre 调用；Lua 固定于
-`/opt/webshark/lua/` 不移动，sharkd 经数据目录 `init.lua` 的 dofile 加载）
-
-```sh
-#!/bin/sh
-# FT1.2 链回内建 dissector 注入(SERIAL_FT12=101|103)
-set -e
-case "$SERIAL_FT12" in
-  103) D=iec60870_5_103 ;;
-  *)   D=iec60870_101 ;;
-esac
-sed -i "s/__FT12_DISSECTOR__/$D/" /opt/webshark/lua/webshark_serial.lua
 ```
 
 **`/opt/webshark/env`**（EnvironmentFile；令牌部署时替换）
@@ -406,8 +391,6 @@ SERIAL_PORTS=/dev/ttyUSB0@9600:modbus
 CAN_IFACES=can0
 # CAN 总线比特率(需与总线上其它节点一致)
 CAN_BITRATE=500000
-# FT1.2 深度解析协议: 101(默认) 或 103
-SERIAL_FT12=101
 ```
 
 **真机验收 checklist**：真实 RS-485 从站发帧验证 645/FT1.2 定界时序；CAN

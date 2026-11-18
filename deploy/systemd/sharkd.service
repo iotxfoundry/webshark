@@ -6,8 +6,7 @@ After=network.target
 User=webshark
 Group=webshark
 Environment=HOME=/opt/webshark
-EnvironmentFile=-/opt/webshark/env
-ExecStartPre=/opt/webshark/setup-lua.sh
+EnvironmentFile=-/opt/webshark/webshark.env
 ExecStart=/opt/webshark/sharkd46/sharkd46.sh /run/webshark/sharkd.sock
 RuntimeDirectory=webshark
 RuntimeDirectoryMode=0755

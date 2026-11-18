@@ -1,7 +1,7 @@
 -- webshark 串口分发器: USER0 帧逐帧嗅探协议并分发（采集层协议无关, 深度解析全在插件侧）。
 -- 分发次序: FT1.2 → DL/T 645 → DL/T 698.45 → Modbus RTU（CRC16(0xA001) 过则链回内建 mbrtu）→ 兜底通用帧。
 -- FT1.2 链回的内建 dissector 不写死: build/entrypoint.sh 按部署环境变量 SERIAL_FT12
--- (101|103, 默认 101) 把 __FT12_DISSECTOR__ 占位替换为 iec60870_101 / iec60870_5_103。
+-- (101|103, 默认 101) 把 iec60870_101 占位替换为 iec60870_101 / iec60870_5_103。
 -- 结构特征强的协议先行; 各协议仅按帧结构特征识别, 识别失败自然落下一级。
 local p = Proto("webshark_serial", "Webshark 串口分发")
 local mbrtu = Dissector.get("mbrtu")
@@ -22,7 +22,7 @@ end
 -- FT1.2（IEC 60870-5-101/103 共用链路层）: 内建 iec60870_101 / iec60870_5_103 自带
 -- 完整 FT1.2 成帧 + ASDU 解析, 形态匹配即整帧链回。两者链路帧形态相同, 仅 ASDU
 -- 语义不同; 选哪个由 entrypoint 按 SERIAL_FT12 替换下方占位注入, 本文件不写死。
-local ft12dis = Dissector.get("__FT12_DISSECTOR__")
+local ft12dis = Dissector.get("iec60870_101")
 local function ft12(buf, pinfo, tree)
   local n = buf:len()
   local b0 = buf(0,1):uint()

@@ -7,7 +7,7 @@ User=webshark
 Group=webshark
 SupplementaryGroups=dialout
 Environment=HOME=/opt/webshark
-EnvironmentFile=-/opt/webshark/env
+EnvironmentFile=-/opt/webshark/webshark.env
 # CAN RAW 需 NET_RAW; 串口 eBPF 旁听需 BPF+PERFMON(内核>=5.8; 更老内核改 CAP_SYS_ADMIN)
 AmbientCapabilities=CAP_NET_RAW CAP_BPF CAP_PERFMON
 CapabilityBoundingSet=CAP_NET_RAW CAP_BPF CAP_PERFMON

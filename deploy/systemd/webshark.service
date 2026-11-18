@@ -7,7 +7,7 @@ After=sharkd.service
 User=webshark
 Group=webshark
 Environment=HOME=/opt/webshark
-EnvironmentFile=-/opt/webshark/env
+EnvironmentFile=-/opt/webshark/webshark.env
 ExecStart=/opt/webshark/bin/webshark -listen 0.0.0.0:8080 -sharkd /run/webshark/sharkd.sock -spool /opt/webshark/spool -ring 16
 Restart=always
 RestartSec=2
