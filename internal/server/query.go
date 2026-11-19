@@ -1,12 +1,16 @@
 // query.go - 轻查询路由：GET|POST /api/check（dfilter 校验）与 /api/complete
 // （补全候选）。走进程级轻查询实例（不 load 文件，与追帧隔离）。GET 与 POST
-// 双形态：同名键 body 覆盖 query。sharkd envelope 错误→400，传输失败→503。
+// 双形态：同名键 body 覆盖 query。check 校验失败是业务结果（200 + code），
+// complete 等其余 envelope 错误→400，传输失败→503。
 package server
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+
+	"github.com/iotxfoundry/webshark/sharkd"
 )
 
 // queryBodyMax 轻查询 body 上限。
@@ -36,13 +40,25 @@ func (s *Server) queryInput(w http.ResponseWriter, r *http.Request) (map[string]
 	return in, true
 }
 
-// handleCheck GET|POST /api/check：dfilter 语法校验，响应透传。
+// handleCheck GET|POST /api/check：dfilter 语法校验。校验失败是业务结果而非
+// HTTP 错误：sharkd envelope 错误应 200 + {code,message}（code 非 0 即无效，
+// 前端按 code 判定，不再以 HTTP 状态分类）；传输失败（sharkd 不可达）仍 503。
 func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 	in, ok := s.queryInput(w, r)
 	if !ok {
 		return
 	}
-	s.lightCall(w, r, "check", map[string]string{"filter": in["filter"]})
+	res, err := s.mgr.Light().Call(r.Context(), "check", map[string]string{"filter": in["filter"]})
+	if err != nil {
+		var se *sharkd.Error
+		if errors.As(err, &se) {
+			writeErr(w, http.StatusOK, se.Code, se.Message)
+			return
+		}
+		writeSharkErr(w, err, http.StatusServiceUnavailable, "查询失败")
+		return
+	}
+	writeJSON(w, json.RawMessage(res))
 }
 
 // handleComplete GET|POST /api/complete：dfilter 补全。

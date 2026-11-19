@@ -350,10 +350,10 @@ func TestLightQuery(t *testing.T) {
 		require.Equal(t, float64(0), body["err"])
 	})
 
-	t.Run("check语法错400", func(t *testing.T) {
+	t.Run("check语法错200+code", func(t *testing.T) {
 		_, ts, _, _ := newServer(t, nil)
 		code, body := postJSON(t, ts, "/api/check", `{"filter":"bad filter"}`)
-		require.Equal(t, http.StatusBadRequest, code)
+		require.Equal(t, http.StatusOK, code)
 		require.Equal(t, float64(-1), body["code"])
 		require.Equal(t, "filter syntax error", body["message"])
 	})

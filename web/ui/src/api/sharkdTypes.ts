@@ -108,8 +108,10 @@ export interface SharkdExpertResponse {
   taps?: SharkdExpertTap[];
 }
 
-/** check 响应(warning 形态) */
+/** check 响应: 合法为 {status,warning?}; 非法为 200+{code,message}(code 非 0 即无效) */
 export interface SharkdCheckWarning {
-  status: string;
+  status?: string;
   warning?: string;
+  code?: number;
+  message?: string;
 }

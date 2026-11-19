@@ -24,7 +24,7 @@ describe("applyCompletion", () => {
 });
 
 function Harness({ check, complete, onApply }: {
-  check: (f: string) => Promise<{ status: string; warning?: string }>;
+  check: (f: string) => Promise<{ status?: string; warning?: string; code?: number; message?: string }>;
   complete: (p: string) => Promise<{ f: string; d?: string }[]>;
   onApply?: (v: string) => void;
 }) {
@@ -56,14 +56,14 @@ describe("CaptureFilterBar", () => {
     expect(screen.queryByText("过滤器无效")).not.toBeInTheDocument();
   });
 
-  it("非法 filter: check 抛错 → 错误横幅透传 sharkd 消息", async () => {
-    const check = vi.fn().mockRejectedValue(new Error("Filter invalid - unexpected character"));
+  it("非法 filter: code 非 0 → 错误横幅透传 sharkd 消息", async () => {
+    const check = vi.fn().mockResolvedValue({ code: -5001, message: 'Filter invalid - "mqtt" was unexpected in this context.' });
     const complete = vi.fn().mockResolvedValue([]);
     render(<Harness check={check} complete={complete} />);
     await userEvent.type(screen.getByRole("textbox"), "tcp ===");
     await act(async () => { await vi.advanceTimersByTimeAsync(600); });
     expect(screen.getByText("过滤器无效")).toBeInTheDocument();
-    expect(screen.getByText(/unexpected character/)).toBeInTheDocument();
+    expect(screen.getByText(/unexpected in this context/)).toBeInTheDocument();
   });
 
   it("合法但带 warning: 无错误横幅(校验通过), 渲染非阻塞 warning 横幅透传 sharkd 告警", async () => {
@@ -96,7 +96,7 @@ describe("CaptureFilterBar", () => {
   });
 
   it("校验无效仍出补全: `ip.` 类非法前缀正是补全目标, 不以 check 结果为门槛(对齐 Wireshark)", async () => {
-    const check = vi.fn().mockRejectedValue(new Error('Filter invalid - "." was unexpected in this context.'));
+    const check = vi.fn().mockResolvedValue({ code: -5001, message: 'Filter invalid - "." was unexpected in this context.' });
     const complete = vi.fn().mockResolvedValue([{ f: "ip.addr", d: "Source or Destination Address" }]);
     render(<Harness check={check} complete={complete} />);
     const input = screen.getByRole("textbox");

@@ -84,6 +84,8 @@ sharkd 可达性 + 环窗（最近 `-ring` 片，默认 16）分片清单（`mti
 
 `{"filter": "ip.addr == 1.2.3.4"}` → 透传 sharkd `check`。走进程级轻查询实例，不 load 文件。
 
+校验失败**不是 HTTP 错误**：dfilter 非法时应答 `200` + `{"code": <sharkd envelope code>, "message": "<可读原因>"}`（如 `{"code": -5001, "message": "Filter invalid - ..."}`），前端按 `code` 非 0 判定无效；合法时透传 sharkd 结果（`err:0` / `warning` 形态）。传输失败（sharkd 不可达）仍 `503`。
+
 ### GET|POST /api/complete
 
 补全候选。前端统一传当前输入前缀 `prefix`；sharkd 没有 `prefix` 成员（发它会拒 `-32600 "not a valid member name"`），只有 `field`（字段补全）与 `pref`（协议/首选项补全）两个补全域，服务端因此展开为同值双键：

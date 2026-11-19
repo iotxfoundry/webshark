@@ -70,6 +70,11 @@ export function CaptureFilterBar({ value, onChange, onApply, check, complete, ac
       try {
         const r = await check(v);
         if (seq !== checkSeqRef.current) return;
+        // 校验失败业务化: 200 + {code,message}, code 非 0 即无效(按 code 判定, 不走 HTTP 错误)
+        if (r.code) {
+          setCheckState({ state: "invalid", msg: r.message ?? `filter 无效(code=${r.code})` });
+          return;
+        }
         setCheckState({ state: "valid", msg: r.warning ?? "" });
       } catch (e) {
         if (seq !== checkSeqRef.current) return;
