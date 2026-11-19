@@ -14,10 +14,17 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/iotxfoundry/webshark/internal/spool"
 )
+
+// framesColumns 实时流显式列集（frames column0..N 参数，值=Wireshark
+// col_format 枚举编号）：%m No. / %Rt 相对秒 / %Yt 绝对日期时间 / %s 源 /
+// %d 目的 / %p 协议 / %L 长度 / %i Info——显式列集消除对 sharkd profile
+// 默认列的隐性依赖（列序即推送行 c[] 的契约列序）。
+var framesColumns = [...]string{"32", "36", "0", "38", "11", "35", "34", "25"}
 
 const (
 	// pullInterval 同片增量拉取最小间隔（in-shard 增长无文件事件，纯节拍兜底；
@@ -282,11 +289,16 @@ func (m *Manager) pullShard(s *Session, shard string, pos *streamPos, b *batch, 
 		if s.ctx.Err() != nil || s.Paused() || s.hasPendingFilter() { // 关闭/暂停/待生效筛选（游标已推进续推）
 			return nil
 		}
-		params := struct {
-			Limit  int    `json:"limit"`
-			Skip   int    `json:"skip,omitempty"`   // 0 序省略（sharkd UINTEGER: skip 须 >0，省略=从第 1 行）
-			Filter string `json:"filter,omitempty"` // 普通模式不携（契约）
-		}{pullLimit, pos.cursor, filter}
+		params := map[string]any{"limit": pullLimit}
+		if pos.cursor > 0 { // skip 0 序省略（sharkd UINTEGER: skip 须 >0，省略=从第 1 行）
+			params["skip"] = pos.cursor
+		}
+		if filter != "" { // 普通模式不携（契约）
+			params["filter"] = filter
+		}
+		for i, c := range framesColumns { // 显式列集（见 framesColumns 注）
+			params["column"+strconv.Itoa(i)] = c
+		}
 		res, err := s.CallCtx(s.ctx, "frames", params)
 		if err != nil {
 			return err

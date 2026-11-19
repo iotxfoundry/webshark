@@ -109,7 +109,17 @@ func TestFilterEnterSweepResubmitExit(t *testing.T) {
 	require.Equal(t, "live", liveMsg["mode"])
 	require.Equal(t, "s4.pcapng", liveMsg["shard"], "退出后跳最新分片续推")
 	require.Equal(t, []float64{1, 2}, rowsNums(t, liveMsg))
-	require.False(t, hasLine(m.Written(), `"filter":"tcp","limit"`), "普通段拉取不携 filter")
+	// 退出后 worker 继续按节拍拉取：末个 frames 请求不携 filter 键
+	// （普通模式契约；cumulative Written 含先前筛选段请求，故锁末次）
+	require.Eventually(t, func() bool {
+		var frames []string
+		for _, l := range m.Written() {
+			if strings.Contains(l, `"method":"frames"`) {
+				frames = append(frames, l)
+			}
+		}
+		return len(frames) > 0 && !strings.Contains(frames[len(frames)-1], `"filter"`)
+	}, 5*time.Second, 20*time.Millisecond, "普通段拉取不携 filter: %v", m.Written())
 }
 
 // TestFilterInvalidCheckRejected 锁定 filter 语法校验：轻查询实例 check 失败 →

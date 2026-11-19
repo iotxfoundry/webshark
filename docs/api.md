@@ -122,6 +122,8 @@ WebSocket 升级，`?handle=<handle>&token=<token>`。见第 3 节。
 
 `ref` 是前端点行查详情的查询键。`rows` 为微批：批满 32 行或 80ms 兜底即发，跨分片边界必冲刷（同一批不混分片）。
 
+服务端以显式列集（frames 请求 `column0..column7`）拉取，推送行 `c[]` 固定 8 列：No.（%m）、相对秒（%Rt）、绝对日期时间（%Yt）、源（%s）、目的（%d）、协议（%p）、长度（%L）、Info（%i）——列序是前端契约，不随 sharkd profile 默认列变化。
+
 ### 上行
 
 ```json

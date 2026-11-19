@@ -411,6 +411,43 @@ func TestFramesSkipSemantics(t *testing.T) {
 	}, 5*time.Second, 20*time.Millisecond, "增量拉取须带 skip=3: %v", frames)
 }
 
+// TestFramesColumnsSpec 锁定 frames 显式列集协议（sharkd column0..N 参数，值=
+// Wireshark col_format 枚举编号）：每个 frames 请求必携 column0..column7 且编
+// 号固定——显式列集消除对 sharkd profile 默认列的隐性依赖，服务端推送行 c[]
+// 列序对前端是契约。
+func TestFramesColumnsSpec(t *testing.T) {
+	spoolDir := t.TempDir()
+	testutil.WriteShard(t, spoolDir, "s1.pcapng", time.Now(), []byte("pcap"))
+	m := startMemSharkd(t)
+	m.SetRows("s1.pcapng", 2)
+	mgr := newManager(t, m.Addr(), spoolDir)
+	ws, _ := dialSession(t, mustSession(t, mgr, "tkc"), true)
+	require.Equal(t, `{"type":"hello","mode":"live"}`, testutil.ReadFrame(t, ws))
+	readUntilType(t, ws, "rows", 5*time.Second)
+	require.Eventually(t, func() bool { return hasLine(m.Written(), `"method":"frames"`) },
+		5*time.Second, 20*time.Millisecond)
+
+	want := []struct{ key, val string }{
+		{"column0", "32"}, // %m No.
+		{"column1", "36"}, // %Rt 相对秒
+		{"column2", "0"},  // %Yt 绝对日期时间
+		{"column3", "38"}, // %s 源
+		{"column4", "11"}, // %d 目的
+		{"column5", "35"}, // %p 协议
+		{"column6", "34"}, // %L 长度
+		{"column7", "25"}, // %i Info
+	}
+	for _, l := range m.Written() {
+		if !strings.Contains(l, `"method":"frames"`) {
+			continue
+		}
+		for _, c := range want {
+			require.Contains(t, l, fmt.Sprintf(`%q:%q`, c.key, c.val), "frames 请求列集: %s", l)
+		}
+		require.NotContains(t, l, `"column8"`, "列集恰 8 列: %s", l)
+	}
+}
+
 // TestPauseResumeBackfill 锁定流控制：pause 冻结（不追新片不推增量，落盘不受
 // 影响），resume 后冻结期间轮换/增长的分片逐片补推（历史连续）再回实时。冻结期
 // 零推送以"短超时读探针超时"证明（该连接读错不复用，resume 断言走重连）。
