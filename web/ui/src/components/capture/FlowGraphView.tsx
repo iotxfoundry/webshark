@@ -14,9 +14,9 @@ import { useMonoStyles } from "../../styles/mono";
 import { hintDrawer } from "../../styles/hint";
 import { buildFlow, FLOW_LIMIT, type FlowItem } from "../../utils/flowGraph";
 
-// 时间列宽: 完整绝对时间截取段 "HH:MM:SS.nnnnnnnnn"(18 字符)在 base100 mono 下约 108px,
-// 加左右 padding 需 132px, 避免省略号截断(完整串另有 title 兜底)
-const TIME_W = 132;
+// 时间列宽: 完整绝对时间截取段 "HH:MM:SS.nnnnnnnnn" 为 18 字符; 用 ch 单位随
+// 等宽字体自适应(12px mono ≈ 7.2px/ch), 22ch 含左右 padding 余量, 不随字体回落截断
+const TIME_W = "22ch";
 
 const useStyles = makeStyles({
   body: { display: "flex", flexDirection: "column", minHeight: 0, padding: 0 },
@@ -29,7 +29,7 @@ const useStyles = makeStyles({
   // 泳道表头: 与行内 lanes 同宽同 marginLeft, 保证 host 名对准 lifeline
   hosts: {
     display: "flex", position: "sticky", top: 0, zIndex: 1,
-    marginLeft: `${TIME_W}px`, background: tokens.colorNeutralBackground2,
+    marginLeft: TIME_W, background: tokens.colorNeutralBackground2,
     borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
     padding: `${tokens.spacingVerticalXXS} 0`,
   },
@@ -48,7 +48,7 @@ const useStyles = makeStyles({
     outlineWidth: "1px", outlineStyle: "solid", outlineColor: tokens.colorBrandStroke1, outlineOffset: "-1px",
   },
   time: {
-    width: `${TIME_W}px`, flexShrink: 0, padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
+    width: TIME_W, flexShrink: 0, padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
     fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3,
     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
   },
