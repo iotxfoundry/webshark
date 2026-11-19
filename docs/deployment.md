@@ -119,7 +119,7 @@ sudo systemctl restart sharkd
 
 自定义颜色：编辑目标 `colorfilters` 后重启 sharkd（Wireshark 桌面版「视图 → 着色规则」导出的文件通用，`@名称@过滤表达式@[bg][fg]` 行式格式）。
 
-包列表的绝对日期时间列按 sharkd 进程时区渲染，生产部署须注意 sharkd 服务的 `TZ`（默认继承系统时区）。
+包列表的绝对日期时间列按 sharkd 进程时区渲染；unit 默认 `TZ=Asia/Shanghai`（系统时区为 UTC 时须显式设置，按现场时区改后重启 sharkd）。
 
 ## 反向代理
 

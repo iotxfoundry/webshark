@@ -6,6 +6,8 @@ After=network.target
 User=webshark
 Group=webshark
 Environment=HOME=/opt/webshark
+# 绝对日期时间列(%Yt)按 sharkd 进程时区渲染; 系统时区为 UTC 时须显式设本地时区
+Environment=TZ=Asia/Shanghai
 EnvironmentFile=-/opt/webshark/webshark.env
 # 经典模式(argv[1]=unix:...)启用 SIGCHLD SIG_IGN, 自动回收每连接会话子进程;
 # gold(-a)模式上游无回收, 会话子进程僵尸堆积。sharkd 经典模式自行 daemonize
