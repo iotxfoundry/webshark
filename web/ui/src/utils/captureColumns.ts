@@ -1,6 +1,6 @@
 // captureColumns.ts - 包列集契约(与 internal/stream/worker.go framesColumns 对应).
 // 服务端 frames 调用显式传 column0..N, 编号 = sharkd COL_* 枚举(4.6.9 实测):
-// 32=%m No., 36=%Rt 相对秒, 0=%Yt 绝对日期时间(本地时区), 38=%s 源, 11=%d 目的,
+// 32=%m No., 36=%Rt 相对秒, 0=%Yt 绝对日期时间(本地时区), 37=%s 源, 11=%d 目的,
 // 35=%p 协议, 34=%L 长度, 25=%i Info. 双时间列恒推送, 时间格式切换/列显隐为
 // 纯前端选择(零重推, localStorage 持久化).
 export const COL = { no: 0, rel: 1, abs: 2, src: 3, dst: 4, proto: 5, len: 6, info: 7 } as const;

@@ -431,7 +431,7 @@ func TestFramesColumnsSpec(t *testing.T) {
 		{"column0", "32"}, // %m No.
 		{"column1", "36"}, // %Rt 相对秒
 		{"column2", "0"},  // %Yt 绝对日期时间
-		{"column3", "38"}, // %s 源
+		{"column3", "37"}, // %s 源
 		{"column4", "11"}, // %d 目的
 		{"column5", "35"}, // %p 协议
 		{"column6", "34"}, // %L 长度

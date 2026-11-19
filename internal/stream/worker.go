@@ -24,7 +24,9 @@ import (
 // col_format 枚举编号）：%m No. / %Rt 相对秒 / %Yt 绝对日期时间 / %s 源 /
 // %d 目的 / %p 协议 / %L 长度 / %i Info——显式列集消除对 sharkd profile
 // 默认列的隐性依赖（列序即推送行 c[] 的契约列序）。
-var framesColumns = [...]string{"32", "36", "0", "38", "11", "35", "34", "25"}
+// 编号按 sharkd 4.6.9 枚举实测（源=37、目的=11）；新版 Wireshark 在 37 处
+// 插入 %Rct 使 38 及之后偏移一位——升级 sharkd 须对照 column.c slist 复核。
+var framesColumns = [...]string{"32", "36", "0", "37", "11", "35", "34", "25"}
 
 const (
 	// pullInterval 同片增量拉取最小间隔（in-shard 增长无文件事件，纯节拍兜底；
