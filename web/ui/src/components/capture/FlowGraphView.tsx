@@ -26,13 +26,17 @@ const useStyles = makeStyles({
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`, flexShrink: 0,
   },
   list: { flex: 1, overflowY: "auto", minHeight: 0 },
-  // 泳道表头: 与行内 lanes 同宽同 marginLeft, 保证 host 名对准 lifeline
-  hosts: {
+  // 表头行: 左「时间」表头 + 右泳道 host 名; sticky 吸顶, 与行内同宽对齐
+  hostsRow: {
     display: "flex", position: "sticky", top: 0, zIndex: 1,
-    marginLeft: TIME_W, background: tokens.colorNeutralBackground2,
+    background: tokens.colorNeutralBackground2,
     borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-    padding: `${tokens.spacingVerticalXXS} 0`,
   },
+  timeHead: {
+    width: TIME_W, flexShrink: 0, padding: `${tokens.spacingVerticalXXS} ${tokens.spacingHorizontalS}`,
+    fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold,
+  },
+  hosts: { display: "flex", flex: 1, padding: `${tokens.spacingVerticalXXS} 0` },
   host: {
     flex: 1, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
     fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold, padding: "0 4px",
@@ -47,11 +51,13 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1Selected,
     outlineWidth: "1px", outlineStyle: "solid", outlineColor: tokens.colorBrandStroke1, outlineOffset: "-1px",
   },
+  // 时间列垂直居中(行高由泳道撑开, 单行文本靠 flex 居中而非顶部内边距)
   time: {
-    width: TIME_W, flexShrink: 0, padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
+    width: TIME_W, flexShrink: 0, display: "flex", alignItems: "center",
+    padding: `0 ${tokens.spacingHorizontalS}`,
     fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3,
-    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
   },
+  timeText: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   lanes: { flex: 1, position: "relative", minHeight: "34px" },
   vline: {
     position: "absolute", top: 0, bottom: 0, width: "1px",
@@ -158,18 +164,23 @@ export function FlowGraphView({ rows, onSelect, onClose }: {
               )}
             </div>
             <div className={styles.list}>
-              {/* 泳道表头(滚动随行, sticky 吸顶): host 名与下方 lifeline 列等分对齐 */}
-              <div className={styles.hosts}>
-                {nodes.map((h) => (
-                  <div key={h} className={styles.host} title={h}>{h}</div>
-                ))}
+              {/* 表头行: 「时间」表头 + 泳道 host 名, sticky 吸顶, 与行内列对齐 */}
+              <div className={styles.hostsRow}>
+                <div className={styles.timeHead}>时间</div>
+                <div className={styles.hosts}>
+                  {nodes.map((h) => (
+                    <div key={h} className={styles.host} title={h}>{h}</div>
+                  ))}
+                </div>
               </div>
               {flows.map((f) => (
                 <div key={f.no} role="button" tabIndex={0}
                   className={mergeClasses(styles.row, selNo === f.no && styles.rowSel)}
                   onClick={() => pick(f)}
                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") pick(f); }}>
-                  <span className={mergeClasses(styles.time, monoS.mono)} title={f.t}>{f.t}</span>
+                  <span className={styles.time}>
+                    <span className={mergeClasses(styles.timeText, monoS.mono)} title={f.t}>{f.t}</span>
+                  </span>
                   <div className={styles.lanes}>
                     {nodes.map((h, i) => (
                       <div key={h} className={styles.vline} style={{ left: `${laneCenter(i, nodes.length)}%` }} />
