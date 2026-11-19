@@ -50,20 +50,22 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3,
     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
   },
-  lanes: { flex: 1, position: "relative", minHeight: "26px" },
+  lanes: { flex: 1, position: "relative", minHeight: "34px" },
   vline: {
     position: "absolute", top: 0, bottom: 0, width: "1px",
     backgroundColor: tokens.colorNeutralStroke2, transform: "translateX(-50%)",
   },
-  arrowBox: {
-    position: "absolute", top: "50%", transform: "translateY(-50%)",
-    display: "flex", alignItems: "center", gap: "4px", minWidth: 0,
-  },
+  // 箭头区: 标签置顶独立成行, 箭头线贯穿整个跨度贴底——两者不争宽度, 方向可辨
+  arrowBox: { position: "absolute", top: 0, bottom: 0, minWidth: 0, pointerEvents: "none" as const },
   arrowLabel: {
-    flexShrink: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+    position: "absolute", top: "2px", maxWidth: "100%",
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
     fontSize: tokens.fontSizeBase100,
   },
-  arrowLine: { flexShrink: 0, position: "relative", height: "1px", backgroundColor: "currentColor", minWidth: "8px" },
+  arrowLine: {
+    position: "absolute", left: 0, right: 0, bottom: "7px", height: "1px",
+    backgroundColor: "currentColor",
+  },
   hint: hintDrawer,
 });
 
@@ -91,16 +93,16 @@ function FlowArrow({ item, count }: { item: FlowItem; count: number }) {
   const g = arrowGeom(item.n, count);
   const color = flowColor(item.c);
   return (
-    <div className={styles.arrowBox}
-      style={{ left: `${g.left}%`, width: `${g.width}%`, color, flexDirection: g.reverse ? "row-reverse" : "row" }}>
-      <span className={styles.arrowLabel}>{item.c}</span>
+    <div className={styles.arrowBox} style={{ left: `${g.left}%`, width: `${g.width}%`, color }}>
+      {/* 标签置顶贴源端(反向时贴右), 与箭头线分行——文字不再挤占/遮挡线, 方向一眼可辨 */}
+      <span className={styles.arrowLabel} style={{ [g.reverse ? "right" : "left"]: 0 }}>{item.c}</span>
       <div className={styles.arrowLine}>
         {/* 箭头尖: 线端三角(反向时朝左) */}
         <span style={{
-          position: "absolute", top: "-3px", width: 0, height: 0,
+          position: "absolute", top: "-4px", width: 0, height: 0,
           [g.reverse ? "left" : "right"]: "-1px",
-          borderTop: "3px solid transparent", borderBottom: "3px solid transparent",
-          [g.reverse ? "borderRight" : "borderLeft"]: "5px solid currentColor",
+          borderTop: "4px solid transparent", borderBottom: "4px solid transparent",
+          [g.reverse ? "borderRight" : "borderLeft"]: "6px solid currentColor",
         }} />
       </div>
     </div>
