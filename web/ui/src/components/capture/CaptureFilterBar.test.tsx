@@ -95,6 +95,20 @@ describe("CaptureFilterBar", () => {
     expect(applied[applied.length - 1]).toContain("== 80");
   });
 
+  it("下拉框失焦即收起, 重聚焦恢复: 还原初值未聚焦时不弹, 点空白可关掉", async () => {
+    const check = vi.fn().mockResolvedValue({ status: "OK" });
+    const complete = vi.fn().mockResolvedValue([{ f: "mqtt", d: "MQ Telemetry Transport Protocol" }]);
+    render(<Harness check={check} complete={complete} />);
+    const input = screen.getByRole("textbox");
+    await userEvent.type(input, "mqtt");
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    await userEvent.tab(); // 失焦(点空白同效): 下拉收起
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    await act(async () => { input.focus(); }); // 重聚焦: 候选仍在, 下拉恢复
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+  });
+
   it("校验无效仍出补全: `ip.` 类非法前缀正是补全目标, 不以 check 结果为门槛(对齐 Wireshark)", async () => {
     const check = vi.fn().mockResolvedValue({ code: -5001, message: 'Filter invalid - "." was unexpected in this context.' });
     const complete = vi.fn().mockResolvedValue([{ f: "ip.addr", d: "Source or Destination Address" }]);

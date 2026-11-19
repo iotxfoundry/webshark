@@ -51,6 +51,9 @@ export function CaptureFilterBar({ value, onChange, onApply, check, complete, ac
   const active = (activeFilter ?? "") !== "";
   const styles = useStyles();
   const [completions, setCompletions] = useState<SharkdCompletion[]>([]);
+  // 下拉框可见性 = 聚焦且有候选: 还原的初值(如 localStorage filter)在页面加载
+  // 后会自动弹补全, 无焦点门控时用户从未聚焦也关不掉(Esc/Enter 够不着输入框)
+  const [compOpen, setCompOpen] = useState(false);
   const inputRef = useRef<HTMLDivElement>(null);
   // check/complete 各自独立的序号(并发防抖丢弃判定分开, 互不抢号)
   const checkSeqRef = useRef(0);
@@ -117,6 +120,8 @@ export function CaptureFilterBar({ value, onChange, onApply, check, complete, ac
           value={value}
           aria-label="显示过滤器"
           onChange={(_, d) => onChange(d.value)}
+          onFocus={() => setCompOpen(true)}
+          onBlur={() => setCompOpen(false)}
           onKeyDown={(e) => {
             if (e.key === "Enter") { setCompletions([]); onApply(value); }
             if (e.key === "Escape") setCompletions([]);
@@ -136,7 +141,7 @@ export function CaptureFilterBar({ value, onChange, onApply, check, complete, ac
             <Dismiss16Regular />
           </button>
         )}
-        {completions.length > 0 && (
+        {compOpen && completions.length > 0 && (
           <div className={styles.completions} role="listbox" style={{ top: "100%", left: 0 }}>
             {completions.map((c, i) => (
               <button key={`${c.f}-${i}`} className={mergeClasses(styles.compItem, styles.compHover)} role="option" aria-selected={false}
