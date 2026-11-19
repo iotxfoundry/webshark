@@ -128,8 +128,6 @@ func (s *Server) Close() error {
 // 直接命中，未知路径回落 index.html（前端 HashRouter，无服务端路由）。
 // 目录列表禁用：Go http.FileServer 对目录回 index.html，这里自定义恒回文件或
 // 提示页，不列目录。
-// 缓存策略：index.html（含未知路径回落）no-cache——每次重验证，保证发版后
-// 浏览器取新入口；/assets/* 文件名带内容哈希，immutable 长缓存。
 func (s *Server) staticHandler() http.Handler {
 	// fs.Sub 只读子树，防穿越由 http.FileServer + fs.FS 语义保证。
 	fileServer := http.FileServer(http.FS(s.webFS))
@@ -141,7 +139,6 @@ func (s *Server) staticHandler() http.Handler {
 		if s.hasSPA {
 			// 未知路径回落 index.html：fs.Stat 命中文件才走 FileServer
 			if _, err := fs.Stat(s.webFS, strings.TrimPrefix(r.URL.Path, "/")); err != nil {
-				w.Header().Set("Cache-Control", "no-cache")
 				data, rerr := fs.ReadFile(s.webFS, "index.html")
 				if rerr != nil {
 					http.NotFound(w, r)
@@ -151,11 +148,6 @@ func (s *Server) staticHandler() http.Handler {
 				_, _ = w.Write(data)
 				return
 			}
-			if r.URL.Path == "/" || r.URL.Path == "/index.html" {
-				w.Header().Set("Cache-Control", "no-cache")
-			} else if strings.HasPrefix(r.URL.Path, "/assets/") {
-				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			}
 			fileServer.ServeHTTP(w, r)
 			return
 		}
@@ -163,7 +155,6 @@ func (s *Server) staticHandler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(placeholderHTML))
 	})
