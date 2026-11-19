@@ -4,7 +4,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { FluentProvider, webDarkTheme } from "@fluentui/react-components";
-import { CapturePacketList, CAPTURE_COLUMNS } from "./CapturePacketList";
+import { CapturePacketList } from "./CapturePacketList";
+import { DISPLAY_COLUMNS, timeIndex } from "../../utils/captureColumns";
 import type { VirtuosoHandle } from "react-virtuoso";
 import type { CaptureViewRow } from "../../hooks/captureAggregator";
 
@@ -48,20 +49,27 @@ vi.mock("react-virtuoso", async () => {
   };
 });
 
+// fixtures: 服务端 8 列投影 c[] — 0=No.(sharkd 帧号, 前端不用) 1=相对秒 2=绝对日期时间 3=源 4=目的 5=协议 6=长度 7=Info
+const ABS_1 = "2026-11-19 17:30:24.664916";
+const ABS_2 = "2026-11-19 17:30:24.665916";
+
 const rows: CaptureViewRow[] = [
-  { c: ["1", "0.000000", "192.168.1.10", "192.168.1.1", "TCP", "60", "443 → 52000 [ACK] Seq=1"], num: 1, no: 1, ref: { shard: "a.pcapng", num: 1 } },
-  { c: ["2", "0.001000", "192.168.1.1", "192.168.1.10", "TCP", "52", "52000 → 443 [ACK]"], num: 2, no: 2, ref: { shard: "a.pcapng", num: 2 }, bg: "ffffcc", fg: "000000" },
+  { c: ["1", "0.000000", ABS_1, "192.168.1.10", "192.168.1.1", "TCP", "60", "443 → 52000 [ACK] Seq=1"], num: 1, no: 1, ref: { shard: "a.pcapng", num: 1 } },
+  { c: ["2", "0.001000", ABS_2, "192.168.1.1", "192.168.1.10", "TCP", "52", "52000 → 443 [ACK]"], num: 2, no: 2, ref: { shard: "a.pcapng", num: 2 }, bg: "ffffcc", fg: "000000" },
 ];
 
-describe("CAPTURE_COLUMNS", () => {
-  it("七列定义", () => {
-    expect(CAPTURE_COLUMNS).toEqual(["No.", "时间", "源", "目的", "协议", "长度", "Info"]);
+describe("DISPLAY_COLUMNS", () => {
+  it("七显示位定义(时间位恒「时间」, rel/abs 由 timeIndex 取值)", () => {
+    expect(DISPLAY_COLUMNS.map((d) => d.label)).toEqual(["No.", "时间", "源", "目的", "协议", "长度", "Info"]);
+    expect(DISPLAY_COLUMNS.map((d) => d.key)).toEqual(["no", "time", "src", "dst", "proto", "len", "info"]);
+    expect(timeIndex("abs")).toBe(2);
+    expect(timeIndex("rel")).toBe(1);
   });
 });
 
 describe("CapturePacketList", () => {
   it("列宽拖拽: 把手方向键调整列宽并持久化 localStorage, 双击复位", () => {
-    localStorage.removeItem("webshark.colwidth.v1");
+    localStorage.removeItem("webshark.colwidth.v2");
     render(
       <FluentProvider theme={webDarkTheme}>
         <div style={{ height: 300 }}>
@@ -70,19 +78,19 @@ describe("CapturePacketList", () => {
       </FluentProvider>,
     );
     expect(screen.getByText("No.").style.width).toBe("52px");
-    // 键盘调整时间列 +16px(jsdom 无 PointerEvent 实现, pointer 拖拽路径以真浏览器为准)
+    // 键盘调整时间列 +8px(jsdom 无 PointerEvent 实现, pointer 拖拽路径以真浏览器为准)
     const handle = screen.getByRole("button", { name: "调整时间列宽(拖拽, 方向键微调, 双击复位)" });
     fireEvent.keyDown(handle, { key: "ArrowRight" });
-    expect(screen.getByText("时间").style.width).toBe("104px");
+    expect(screen.getByText("时间").style.width).toBe("198px");
     // 双击复位(持久化时机)
     fireEvent.doubleClick(handle);
-    expect(screen.getByText("时间").style.width).toBe("96px");
-    expect(JSON.parse(localStorage.getItem("webshark.colwidth.v1")!)[1]).toBe(96);
-    localStorage.removeItem("webshark.colwidth.v1");
+    expect(screen.getByText("时间").style.width).toBe("190px");
+    expect(JSON.parse(localStorage.getItem("webshark.colwidth.v2")!)[1]).toBe(190);
+    localStorage.removeItem("webshark.colwidth.v2");
   });
 
 
-  it("行渲染: 列数组按位置映射七列", () => {
+  it("行渲染: 列数组按契约下标映射七列(默认 abs 时间)", () => {
     render(
       <FluentProvider theme={webDarkTheme}>
         <div style={{ height: 300 }}>
@@ -94,6 +102,7 @@ describe("CapturePacketList", () => {
     expect(screen.getAllByText("TCP")).toHaveLength(2);
     expect(screen.getByText("443 → 52000 [ACK] Seq=1")).toBeInTheDocument();
     expect(screen.getAllByText("60")).toHaveLength(1);
+    expect(screen.getByText(ABS_1)).toBeInTheDocument();
   });
 
   it("点行 → onSelect(该帧)", () => {
@@ -123,8 +132,8 @@ describe("CapturePacketList", () => {
 
   it("色彩滤镜降级: bg 有 fg 缺 → 只染背景不覆盖文字色(无非法 '#inherit'); 无 bg → 无行内染色", () => {
     const r: CaptureViewRow[] = [
-      { c: ["1", "0", "a", "b", "TCP", "60", "no-bg"], num: 1, no: 1, ref: { shard: "a.pcapng", num: 1 } },
-      { c: ["2", "0", "a", "b", "TCP", "60", "bg-only"], num: 2, no: 2, ref: { shard: "a.pcapng", num: 2 }, bg: "ffffcc" },
+      { c: ["1", "0", ABS_1, "a", "b", "TCP", "60", "no-bg"], num: 1, no: 1, ref: { shard: "a.pcapng", num: 1 } },
+      { c: ["2", "0", ABS_2, "a", "b", "TCP", "60", "bg-only"], num: 2, no: 2, ref: { shard: "a.pcapng", num: 2 }, bg: "ffffcc" },
     ];
     const { container } = render(
       <FluentProvider theme={webDarkTheme}>
@@ -191,15 +200,61 @@ describe("CapturePacketList", () => {
         </div>
       </FluentProvider>,
     );
-    for (const h of CAPTURE_COLUMNS) expect(screen.getByText(h)).toBeInTheDocument();
+    for (const d of DISPLAY_COLUMNS) expect(screen.getByText(d.label)).toBeInTheDocument();
     expect(screen.queryByText("TCP")).not.toBeInTheDocument();
   });
 });
 
+describe("CapturePacketList 列设置(时间格式/显隐, 持久化)", () => {
+  afterEach(() => {
+    localStorage.removeItem("webshark.timemode.v1");
+    localStorage.removeItem("webshark.colvis.v1");
+  });
+
+  function renderList() {
+    render(
+      <FluentProvider theme={webDarkTheme}>
+        <div style={{ height: 300 }}>
+          <CapturePacketList rows={rows} onSelect={() => undefined} />
+        </div>
+      </FluentProvider>,
+    );
+  }
+
+  it("时间格式切换: 默认绝对日期时间, 切相对秒后行内时间取 c[1] 且持久化", () => {
+    renderList();
+    expect(screen.getByText(ABS_1)).toBeInTheDocument(); // 默认 abs(契约 c[2])
+    fireEvent.click(screen.getByRole("button", { name: "列设置" }));
+    fireEvent.click(screen.getByRole("radio", { name: "相对秒" }));
+    expect(screen.getByText("0.000000")).toBeInTheDocument(); // rel(c[1])
+    expect(screen.queryByText(ABS_1)).not.toBeInTheDocument();
+    expect(localStorage.getItem("webshark.timemode.v1")).toBe("rel");
+  });
+
+  it("列显隐: 取消勾选「源」后表头与行内源列消失, 且持久化隐藏集", () => {
+    renderList();
+    fireEvent.click(screen.getByRole("button", { name: "列设置" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "源" }));
+    // 表头源列(含拖宽把手)消失; Popover 内勾选标签「源」仍在, 不作表头断言
+    expect(screen.queryByRole("button", { name: /调整源列宽/ })).not.toBeInTheDocument();
+    expect(screen.getAllByText("192.168.1.10")).toHaveLength(1); // 隐藏源后仅剩另一行的目的列
+    expect(JSON.parse(localStorage.getItem("webshark.colvis.v1")!)).toEqual(["src"]);
+  });
+
+  it("持久化还原: 预置 rel + 隐藏「目的」, 渲染即生效(含非法项过滤)", () => {
+    localStorage.setItem("webshark.timemode.v1", "rel");
+    localStorage.setItem("webshark.colvis.v1", JSON.stringify(["dst", "no", "bogus"])); // no 恒显/未知项忽略
+    renderList();
+    expect(screen.getByText("0.000000")).toBeInTheDocument(); // rel 还原
+    expect(screen.queryByText("目的")).not.toBeInTheDocument(); // dst 隐藏
+    expect(screen.getByText("No.")).toBeInTheDocument(); // No. 恒显
+  });
+});
+
 const rows2: CaptureViewRow[] = [
-  { c: ["7", "1.000000", "a", "b", "TCP", "60", "info 7"], num: 7, no: 1, ref: { shard: "b.pcapng", num: 7 } },
-  { c: ["8", "1.001000", "a", "b", "TCP", "52", "info 8"], num: 8, no: 2, ref: { shard: "b.pcapng", num: 8 } },
-  { c: ["9", "1.002000", "a", "b", "TCP", "60", "info 9"], num: 9, no: 3, ref: { shard: "b.pcapng", num: 9 } },
+  { c: ["7", "1.000000", ABS_1, "a", "b", "TCP", "60", "info 7"], num: 7, no: 1, ref: { shard: "b.pcapng", num: 7 } },
+  { c: ["8", "1.001000", ABS_2, "a", "b", "TCP", "52", "info 8"], num: 8, no: 2, ref: { shard: "b.pcapng", num: 8 } },
+  { c: ["9", "1.002000", ABS_1, "a", "b", "TCP", "60", "info 9"], num: 9, no: 3, ref: { shard: "b.pcapng", num: 9 } },
 ];
 
 describe("CapturePacketList 滚动跟随透传", () => {
