@@ -14,7 +14,9 @@ import { useMonoStyles } from "../../styles/mono";
 import { hintDrawer } from "../../styles/hint";
 import { buildFlow, FLOW_LIMIT, type FlowItem } from "../../utils/flowGraph";
 
-const TIME_W = 110;
+// 时间列宽: 完整绝对时间截取段 "HH:MM:SS.nnnnnnnnn"(18 字符)在 base100 mono 下约 108px,
+// 加左右 padding 需 132px, 避免省略号截断(完整串另有 title 兜底)
+const TIME_W = 132;
 
 const useStyles = makeStyles({
   body: { display: "flex", flexDirection: "column", minHeight: 0, padding: 0 },
