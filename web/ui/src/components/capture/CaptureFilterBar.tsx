@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Input, Badge, MessageBar, MessageBarBody, MessageBarTitle, makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
 import { Dismiss16Regular } from "@fluentui/react-icons";
-import type { SharkdCompletion } from "../../api/sharkdTypes";
+import type { SharkdCompletion, SharkdCheckWarning } from "../../api/sharkdTypes";
 import { monoStyle } from "../../styles/mono";
 import { errMsg as toErrMsg } from "../../api/client";
 
@@ -43,7 +43,8 @@ export function CaptureFilterBar({ value, onChange, onApply, check, complete, ac
   value: string;
   onChange: (v: string) => void;
   onApply: (v: string) => void;
-  check: (f: string) => Promise<{ status: string; warning?: string }>;
+  /** check: 校验应答(合法 {status,warning?} / 非法 200+{code,message}, 契约见 SharkdCheckWarning) */
+  check: (f: string) => Promise<SharkdCheckWarning>;
   complete: (p: string) => Promise<SharkdCompletion[]>;
   /** 已生效筛选(非空 = 筛选模式激活: 输入框高亮 + 「筛选中」角标; 空串 = 普通流) */
   activeFilter?: string;

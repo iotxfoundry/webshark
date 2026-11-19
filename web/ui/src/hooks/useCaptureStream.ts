@@ -12,7 +12,7 @@ import {
   checkCaptureFilter, completeCaptureFilter, fetchCaptureFrame,
   followCaptureStream, tapCaptureExpert,
 } from "../api/capture";
-import type { SharkdExpertResponse, SharkdFollowResult, SharkdFrameDetail } from "../api/sharkdTypes";
+import type { SharkdCheckWarning, SharkdExpertResponse, SharkdFollowResult, SharkdFrameDetail } from "../api/sharkdTypes";
 import { openSharkdTransport, type SharkdConn } from "./sharkdTransport";
 import { createCaptureAggregator, type CaptureAggregator, type CaptureViewRow } from "./captureAggregator";
 import { getTokenVersion, onTokenChange, awaitingFirstToken } from "../api/token";
@@ -119,8 +119,8 @@ export function useCaptureStream(initialFilter?: string) {
   }, []);
 
   /** check: display filter 校验(400 envelope 错误透传 sharkd 文案, OK/warning 返回), HTTP */
-  const checkFilter = useCallback(async (f: string) => {
-    if (f.trim() === "") return { status: "OK" } as { status: string; warning?: string };
+  const checkFilter = useCallback(async (f: string): Promise<SharkdCheckWarning> => {
+    if (f.trim() === "") return { status: "OK" };
     return await checkCaptureFilter(f);
   }, []);
 
