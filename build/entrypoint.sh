@@ -53,6 +53,9 @@ rm -f "$SHARKD_SOCK"
 
 # 三个进程均为守护循环：崩溃/退出 2s 后自动拉起（sharkd 无状态，webshark
 # 按请求重连自愈；dumpcap 接口暂缺时循环重试）
+# shortcut: sharkd gold(-a)模式上游不回收每连接会话子进程, 长命容器会积僵尸;
+# 容器重建即清零。根治须换经典模式(sharkd "unix:$SHARKD_SOCK" 自 daemonize +
+# 去掉本重启循环), systemd 部署已根治, 见 deploy/systemd/sharkd.service
 (
 	while :; do
 		sharkd -a "unix:$SHARKD_SOCK" --foreground || true

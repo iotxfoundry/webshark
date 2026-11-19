@@ -356,7 +356,11 @@ User=webshark
 Group=webshark
 Environment=HOME=/opt/webshark
 EnvironmentFile=-/opt/webshark/webshark.env
-ExecStart=/opt/webshark/bin/sharkd -a unix:/run/webshark/sharkd.sock --foreground
+# 经典模式(argv[1]=unix:...)启用 SIGCHLD SIG_IGN, 自动回收每连接会话子进程;
+# gold(-a)模式上游无回收, 会话子进程僵尸堆积。sharkd 经典模式自行 daemonize
+# (fork 后父进程退出), 须 Type=forking 由 systemd 认领子进程
+Type=forking
+ExecStart=/opt/webshark/bin/sharkd unix:/run/webshark/sharkd.sock
 RuntimeDirectory=webshark
 RuntimeDirectoryMode=0755
 Restart=always
@@ -367,7 +371,7 @@ WantedBy=multi-user.target
 ```
 
 > 实际部署的 ExecStart 直启二进制（无 wrapper）：
-> `ExecStart=/opt/webshark/bin/sharkd -a unix:/run/webshark/sharkd.sock --foreground`
+> `ExecStart=/opt/webshark/bin/sharkd unix:/run/webshark/sharkd.sock`
 
 **`/etc/systemd/system/dumpcap.service`**（设备实际为主单元 + `dumpcap.service.d/filter.conf`
 drop-in 追加 `-f '${CAPTURE_FILTER}'`，此处合并呈现）
