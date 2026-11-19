@@ -37,7 +37,7 @@ Before=webshark.service
 # 与 sharkd/webshark 同一用户：同一用户写/读 spool，避免 0600 分片属主隔离。
 # 抓包权限来自发行版 filecap（cap_net_admin,cap_net_raw），与运行用户无关。
 User=webshark
-ExecStart=/usr/bin/dumpcap -i eth0 -b filesize:8388608 -b files:16 -w /var/lib/webshark/net.pcapng
+ExecStart=/usr/bin/dumpcap -i eth0 -b filesize:8192 -b files:16 -w /var/lib/webshark/net.pcapng
 Restart=always
 RestartSec=3
 
@@ -52,7 +52,7 @@ PrivateTmp=yes
 WantedBy=multi-user.target
 ```
 
-- `-i eth0`：按实际网卡改；`-b filesize:8388608`（8MiB/片）与 `-b files:16` 对应 webshark 默认环窗 `-ring 16`，改一处须同步另一处。
+- `-i eth0`：按实际网卡改；`-b filesize:8192`（**单位是 kB**，8192 kB = 8 MiB/片，勿按字节传）与 `-b files:16` 对应 webshark 默认环窗 `-ring 16`，改一处须同步另一处。
 - dumpcap 需要原始能力，`NoNewPrivileges` 不设 yes（见 unit 注释）。
 
 ### sharkd.service
@@ -300,7 +300,8 @@ CGO_ENABLED=0 交叉编译的静态 ELF（`GOOS=linux GOARCH=arm64`）。
 ├── bin/
 │   ├── webshark                           服务(HTTP/WS + SPA)
 │   ├── pktdump                            串口/CAN 采集器
-│   └── sharkd                             sharkd 4.6.9(PPA noble 构建, Lua 启用)
+│   ├── sharkd                             sharkd 4.6.9(PPA noble 构建, Lua 启用)
+│   └── dumpcap                            dumpcap 4.6.9(同一 PPA noble 构建, 与 sharkd 同版本)
 ├── lib/                                   sharkd 运行库树(libwireshark/libwiretap/libwsutil/libgcrypt…)
 ├── lua/
 │   ├── init.lua                           Lua 主入口(系统 init.lua 仅一行 bootstrap 指向此文件)
@@ -318,10 +319,28 @@ CGO_ENABLED=0 交叉编译的静态 ELF（`GOOS=linux GOARCH=arm64`）。
 指向 /opt/webshark 下的 Lua 主入口——全部 Lua 配置由此收敛于 /opt/webshark/lua/，
 系统目录零配置）、`plugins/4.6/`（C 插件扫描目录）。
 
+**dumpcap 同版本（关键）**：dumpcap 与 sharkd 必须同一 Wireshark 版本，均取自
+**PPA wireshark-dev/stable 的 noble 构建**（同源同版本）。dumpcap 收录在
+`wireshark-common` deb 内，抽出放入 bin/，并与 sharkd 一并以 patchelf 写入
+RUNPATH（`$ORIGIN/../lib`）——私有库解析自包含，不依赖 `/etc/ld.so.conf.d`
+与 `ldconfig`；抓包能力由 unit 的 AmbientCapabilities 授予：
+
+```sh
+wget -P /tmp https://ppa.launchpadcontent.net/wireshark-dev/stable/ubuntu/pool/main/w/wireshark/wireshark-common_4.6.9-1~ubuntu24.04.0~ppa1_arm64.deb
+dpkg-deb -x /tmp/wireshark-common_4.6.9-1~ubuntu24.04.0~ppa1_arm64.deb /tmp/ws
+sudo cp /tmp/ws/usr/bin/dumpcap /opt/webshark/bin/
+sudo chown webshark:webshark /opt/webshark/bin/dumpcap
+# patchelf 需二进制未运行: 先停服; webshark 有 Requires=sharkd, 停 sharkd 会连带停它, 改完一并拉起
+sudo systemctl stop sharkd dumpcap
+sudo patchelf --set-rpath '$ORIGIN/../lib' /opt/webshark/bin/sharkd /opt/webshark/bin/dumpcap
+sudo systemctl start sharkd dumpcap webshark
+```
+
 注意：PPA 构建的库树与数据文件随 deb 安装在 `/usr/lib/aarch64-linux-gnu/`
-与 `/usr/share/wireshark/`（系统路径）；板载部署将其收敛进 `/opt/webshark/sharkd/`
-自包含目录，运行库经 `/etc/ld.so.conf.d/webshark.conf` 注册 + `ldconfig` 生效，
-数据目录按程序目录解析（strace 实证），二者兼容。
+与 `/usr/share/wireshark/`（系统路径）；板载部署将其收敛进 `/opt/webshark/`
+自包含目录，私有库解析走**二进制内嵌 RUNPATH**（`$ORIGIN/../lib`，安装后以
+patchelf 写入，见下文「dumpcap 同版本」），**不依赖** `/etc/ld.so.conf.d`
+等系统配置；数据目录按程序目录解析（strace 实证）。
 
 systemd 单元与脚本（与设备 `/etc/systemd/system/`、`/opt/webshark/` 逐字一致）：
 
@@ -349,6 +368,31 @@ WantedBy=multi-user.target
 
 > 实际部署的 ExecStart 直启二进制（无 wrapper）：
 > `ExecStart=/opt/webshark/bin/sharkd -a unix:/run/webshark/sharkd.sock --foreground`
+
+**`/etc/systemd/system/dumpcap.service`**（设备实际为主单元 + `dumpcap.service.d/filter.conf`
+drop-in 追加 `-f '${CAPTURE_FILTER}'`，此处合并呈现）
+
+```ini
+[Unit]
+Description=dumpcap 网络采集器(有线网卡 → webshark spool)
+After=network.target
+
+[Service]
+User=webshark
+Group=webshark
+EnvironmentFile=-/opt/webshark/webshark.env
+# 网络抓包需 NET_ADMIN+NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+# filesize 单位是 kB(dumpcap -h): 8192 kB = 8 MiB, 勿按字节传; dumpcap 须与
+# sharkd 同版本, 见上文「dumpcap 同版本」
+ExecStart=/opt/webshark/bin/dumpcap -i ${NETWORK_IFACE} -f '${CAPTURE_FILTER}' -b filesize:8192 -b files:16 -w /opt/webshark/spool/net.pcapng
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+```
 
 **`/etc/systemd/system/pktdump.service`**
 

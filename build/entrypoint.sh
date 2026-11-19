@@ -74,8 +74,10 @@ if [ "$DUMPCAP_IFACE" != "none" ]; then
 	(
 		while :; do
 			# shellcheck disable=SC2086
+			# dumpcap -b filesize 的单位是 kB（dumpcap -h 原文 "after NUM kB"），
+			# DUMPCAP_FILESIZE 是字节语义（pktdump --roll 同值直接用），此处换算
 			dumpcap -i "$DUMPCAP_IFACE" ${DUMPCAP_FILTER:+-f "$DUMPCAP_FILTER"} \
-				-b filesize:"$DUMPCAP_FILESIZE" -b files:"$DUMPCAP_FILES" \
+				-b filesize:"$((DUMPCAP_FILESIZE / 1024))" -b files:"$DUMPCAP_FILES" \
 				-w "$SPOOL/net.pcapng" 2> "$DUMPCAP_STDERR" || true
 			sleep 2
 		done

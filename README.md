@@ -36,7 +36,7 @@ webshark 是 **Wireshark 的 Web 前端**（仅服务端）：不生产 pcapng�
 ```sh
 make all                      # 前端打包 web/dist.zip + 二进制 bin/webshark
 sudo mkdir -p /var/lib/webshark /run/webshark
-sudo dumpcap -i eth0 -b filesize:8388608 -b files:16 -w /var/lib/webshark/net.pcapng
+sudo dumpcap -i eth0 -b filesize:8192 -b files:16 -w /var/lib/webshark/net.pcapng
 ```
 
 2. 启动 sharkd daemon：
@@ -108,7 +108,7 @@ docker run -d --name webshark -p 8080:8080 \
 | `SPOOL` | `/var/lib/webshark` | 分片目录（建议挂持久卷） |
 | `DUMPCAP_IFACE` | `eth0` | 抓包网卡；`none` = 不启动抓包 |
 | `DUMPCAP_FILTER` | 空 | BPF 捕获过滤串 |
-| `DUMPCAP_FILESIZE` | `8388608` | 单分片字节数 |
+| `DUMPCAP_FILESIZE` | `8388608` | 单分片字节数（pktdump 直接用；dumpcap 侧自动换算为 kB 传入——其 `-b filesize` 单位是 kB） |
 | `DUMPCAP_FILES` | `16` | 分片数（容器内自动与 `-ring` 对齐） |
 | `DUMPCAP_STDERR` | `/dev/null` | dumpcap stderr 去向（其 `\rPackets: N` 进度行在容器日志中会与其他进程日志穿插；调试时设 `/dev/stderr` 或文件路径） |
 | `SERIAL_PORTS` | 空 | 串口采集列表，逗号分隔 `/dev/ttyUSB0@115200,/dev/ttyUSB1@9600`（`@波特率` 缺省 115200，仅用于 3.5 字符静默成帧时序，不碰 termios）。**协议无关采集**：Modbus RTU、FT1.2（IEC 101/103）、DL/T 645、DL/T 698.45 等多协议可混接，深度解析由容器内 sharkd 的 Lua 分发器完成；空 = 不采串口。部署前提见 [docs/deployment.md](docs/deployment.md)「串口与 CAN」 |

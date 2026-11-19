@@ -3,9 +3,10 @@
 // 详情 + 分片合并导出 + 静态界面」的完整 HTTP 服务。
 //
 // webshark 自身不生产 pcapng，也不解析协议：pcapng 分片由外部 dumpcap 以环形
-// 滚动方式写入 spool 目录（如 dumpcap -b filesize:8388608 -b files:16 -w
-// <spool>/net.pcapng），协议解析由外部 sharkd daemon 承担（经 Unix socket
-// 访问）。本库只做装配、路由与流式推送。接口契约见仓库 docs/api.md。
+// 滚动方式写入 spool 目录（如 dumpcap -b filesize:8192 -b files:16 -w
+// <spool>/net.pcapng；filesize 单位是 kB，8192 kB = 8 MiB），协议解析由外部
+// sharkd daemon 承担（经 Unix socket 访问）。本库只做装配、路由与流式推送。
+// 接口契约见仓库 docs/api.md。
 //
 // # 最小用法
 //

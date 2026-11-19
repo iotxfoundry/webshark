@@ -7,9 +7,12 @@ User=webshark
 Group=webshark
 EnvironmentFile=-/opt/webshark/webshark.env
 # 网络抓包需 NET_ADMIN+NET_RAW(Ambient 授予, 兜底 apt 包自带的 filecap)
+# arm64 板载部署(/opt/webshark 布局): 改用 /opt/webshark/bin/dumpcap——须与
+# sharkd 同版本(同一 PPA 包抽出), 见 docs/deployment.md「dumpcap 同版本」
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
-ExecStart=/usr/bin/dumpcap -i ${NETWORK_IFACE} -b filesize:8388608 -b files:16 -w /opt/webshark/spool/net.pcapng
+# filesize 单位是 kB（dumpcap -h: "after NUM kB"）: 8192 kB = 8 MiB, 勿按字节传
+ExecStart=/usr/bin/dumpcap -i ${NETWORK_IFACE} -b filesize:8192 -b files:16 -w /opt/webshark/spool/net.pcapng
 Restart=always
 RestartSec=2
 
