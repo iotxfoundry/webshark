@@ -37,8 +37,14 @@ const useStyles = makeStyles({
   cProto: { flexShrink: 0, width: "70px" },
   cLen: { flexShrink: 0, width: "56px", textAlign: "right" as const },
   cInfo: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const },
-  // 列宽拖拽把手: 贴列头右缘 4px 竖条(覆盖列边界便于命中), 键盘聚焦显示描边
-  colHandle: { position: "absolute", top: 0, bottom: 0, right: 0, width: "5px", marginRight: "-2px", padding: "0", border: "none", background: "none", cursor: "col-resize", touchAction: "none" as const, zIndex: 1, ":hover": { backgroundColor: tokens.colorBrandStroke1 }, ":focus-visible": { outlineWidth: "1px", outlineStyle: "solid", outlineColor: tokens.colorBrandStroke1 } },
+  // 列宽拖拽把手: 贴列头右缘 5px 命中区(跨列边界), 恒显 1px 中性分隔线(可供性可见),
+  // 悬停/键盘聚焦/按下转品牌色(与 eplugins 表格可供性同款), col-resize 光标内建
+  colHandle: { position: "absolute", top: 0, bottom: 0, right: 0, width: "5px", marginRight: "-2px", padding: "0", border: "none", background: "none", cursor: "col-resize", touchAction: "none" as const, zIndex: 1,
+    ":hover": { backgroundColor: tokens.colorBrandStroke1 }, ":focus-visible": { outlineWidth: "1px", outlineStyle: "solid", outlineColor: tokens.colorBrandStroke1 },
+    "::after": { content: '""', position: "absolute", top: 0, bottom: 0, right: "2px", width: "1px", backgroundColor: tokens.colorNeutralStroke2 },
+    ":hover::after": { backgroundColor: tokens.colorBrandStroke1 },
+    ":focus-visible::after": { backgroundColor: tokens.colorBrandStroke1 },
+    ":active::after": { backgroundColor: tokens.colorBrandStroke1 } },
 });
 
 export const CAPTURE_COLUMNS = ["No.", "时间", "源", "目的", "协议", "长度", "Info"] as const;
