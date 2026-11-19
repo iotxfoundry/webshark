@@ -26,7 +26,7 @@ function rpcRequests(ws: MockWebSocket): Record<string, unknown>[] {
 }
 
 function wire(num: number, shard = "a.pcapng"): CaptureRowWire {
-  return { c: [String(num), "0.000000", "a", "b", "TCP", "60", `info ${num}`], num, ref: { shard, num } };
+  return { c: [String(num), "0.000000", "2026-11-19 17:30:24.664916", "a", "b", "TCP", "60", `info ${num}`], num, ref: { shard, num } };
 }
 
 describe("CapturePage", () => {
@@ -218,6 +218,22 @@ describe("CapturePage", () => {
     expect(screen.getByText("Ethernet II")).toBeInTheDocument();
     // 面板头帧徽标 = 聚合序号
     expect(screen.getAllByText("帧 3").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("流图: 工具栏入口开抽屉, 端点/流行渲染(当前筛选 rows 纯前端构建), 点流行回选帧走 HTTP frame", async () => {
+    await mountOpen([wire(1), wire(2)]);
+    fireEvent.click(screen.getByRole("button", { name: "流图" }));
+    // 抽屉: 端点名(源/目的列值)与流行标签(协议 · Info)渲染
+    expect(screen.getAllByText("a").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("TCP · info 1")).toBeInTheDocument();
+    // 点第 1 帧流行 → 复用行选择管线: HTTP frame 查询 ref=a.pcapng#1
+    fireEvent.click(screen.getByText("TCP · info 1"));
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+    const calls = frameCalls();
+    expect(calls).toHaveLength(1);
+    const q = new URL(calls[0], "http://localhost").searchParams;
+    expect(q.get("shard")).toBe("a.pcapng");
+    expect(q.get("num")).toBe("1");
   });
 
   it("frame 详情 404(历史分片)横幅在下一次成功 fetchFrame 后清除", async () => {

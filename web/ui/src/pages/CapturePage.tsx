@@ -16,7 +16,7 @@ import {
   Text, makeStyles, mergeClasses, tokens, Tooltip,
 } from "@fluentui/react-components";
 import {
-  ArrowDownload24Regular, Chat16Regular, Info16Regular, Key16Regular,
+  ArrowDownload24Regular, BranchFork24Regular, Chat16Regular, Info16Regular, Key16Regular,
   Pause16Regular, Play16Regular, WeatherMoon16Regular, WeatherSunny16Regular,
 } from "@fluentui/react-icons";
 import { useCaptureStream } from "../hooks/useCaptureStream";
@@ -33,6 +33,7 @@ import { CapturePacketList } from "../components/capture/CapturePacketList";
 import { CaptureTreeView } from "../components/capture/CaptureTreeView";
 import { CaptureHexView, type HexMode } from "../components/capture/CaptureHexView";
 import { FollowStreamView } from "../components/capture/FollowStreamView";
+import { FlowGraphView } from "../components/capture/FlowGraphView";
 import { ExpertPanel } from "../components/capture/ExpertPanel";
 import { useMonoStyles } from "../styles/mono";
 import { hintPane, hintMuted } from "../styles/hint";
@@ -190,6 +191,8 @@ export default function CapturePage({ embedded = false, onOpenToken }: { embedde
 
   // 专家信息开关(抽屉覆层). 定位分片以 tap 应答为准(轮换后也可信), 打开面板无需快照
   const [expertOpen, setExpertOpen] = useState(false);
+  // 流图开关(抽屉覆层): 从内存 rows 纯前端构建, 天然跟随当前筛选与实时推送
+  const [flowOpen, setFlowOpen] = useState(false);
 
   // 专家信息行点击 → 选中该帧并拉详情. 最小实现: 不强求包列表滚动定位; 命中已持有行
   // (按 tap 分片+帧号匹配)则复用行选择获得列表高亮, 否则以 tap 分片+帧号合成行仅拉详情
@@ -257,6 +260,11 @@ export default function CapturePage({ embedded = false, onOpenToken }: { embedde
         <Button className={styles.btn} icon={<Info16Regular />}
           onClick={() => setExpertOpen(true)}>
           专家信息
+        </Button>
+        {/* 流图: 当前筛选结果的 endpoint 序列图(纯前端构建, 点击流行定位帧) */}
+        <Button className={styles.btn} icon={<BranchFork24Regular />}
+          onClick={() => setFlowOpen(true)} disabled={rows.length === 0}>
+          流图
         </Button>
         {/* 暂停/恢复抓包: WS 上行 _ctl 流控制(冻结推送; 落盘 spool 不受影响) */}
         <Tooltip content="暂停后界面停止接收新报文, 磁盘记录不受影响; 断线期间的切换将在重连后生效" relationship="description">
@@ -383,6 +391,11 @@ export default function CapturePage({ embedded = false, onOpenToken }: { embedde
       {/* 专家信息汇总(抽屉覆层) */}
       {expertOpen && (
         <ExpertPanel fetchExpert={fetchExpert} onFrameSelect={onExpertFrame} onClose={() => setExpertOpen(false)} />
+      )}
+
+      {/* 流图(抽屉覆层): 当前筛选 endpoint 序列图, 点击流行 → 复用行选择管线查帧详情 */}
+      {flowOpen && (
+        <FlowGraphView rows={rows} onSelect={(r) => void onRowSelect(r)} onClose={() => setFlowOpen(false)} />
       )}
     </div>
   );
